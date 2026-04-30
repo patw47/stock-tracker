@@ -1,0 +1,180 @@
+{
+  "name": "Veille Boursière Quotidienne",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 14 * * *" }]
+        }
+      },
+      "id": "node-schedule",
+      "name": "Schedule 8h Lun-Ven",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const portfolio = [\n  { symbol: 'BBAI', sector: 'IA défense', status: 'portfolio' },\n  { symbol: 'HIMS', sector: 'Téléhealth', status: 'portfolio' },\n  { symbol: 'HYLN', sector: 'Camions électriques', status: 'portfolio' },\n  { symbol: 'MMED', sector: 'Psychédéliques thérapeutiques', status: 'portfolio' },\n  { symbol: 'PRCH', sector: 'Assurance tech', status: 'portfolio' },\n  { symbol: 'RGTI', sector: 'Informatique quantique', status: 'portfolio' },\n  { symbol: 'VUZI', sector: 'Smart glasses / AR', status: 'portfolio' },\n  { symbol: 'XYL', sector: \"Gestion de l'eau\", status: 'portfolio' }\n];\nconst watchlist = [\n  { symbol: 'SMR', sector: 'Nucléaire SMR', status: 'watchlist' },\n  { symbol: 'ALTD', sector: 'Drones FR', status: 'watchlist' },\n  { symbol: 'OKLO', sector: 'Nucléaire SMR', status: 'watchlist' },\n  { symbol: 'BLNK', sector: 'Recharge VE', status: 'watchlist' },\n  { symbol: 'GRO', sector: 'Santé mentale', status: 'watchlist' },\n  { symbol: 'STIM', sector: 'Neuromodulation', status: 'watchlist' },\n  { symbol: 'PLX', sector: 'Diagnostics moléculaires', status: 'watchlist' }\n];\nreturn [...portfolio, ...watchlist].map(t => ({ json: t }));"
+      },
+      "id": "node-read-watchlist",
+      "name": "Lire tickers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { symbol, sector, status } = $input.item.json;\nawait new Promise(r => setTimeout(r, 2000));\nconst date = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });\n\nconst skipRule = `RÈGLE ABSOLUE N°1 : Si tu ne trouves aucune actualité datant de moins de 7 jours sur ${symbol}, réponds UNIQUEMENT le mot : SKIP\\nRÈGLE ABSOLUE N°2 : Ne répète pas une actualité déjà couverte dans un briefing précédent. Si tu n'as rien de nouveau à dire, réponds UNIQUEMENT le mot : SKIP\\nSi l'une de ces deux règles s'applique, ta réponse doit être exclusivement : SKIP (rien d'autre).`;\n\nlet prompt;\nif (status === 'portfolio') {\n  prompt = `Tu es un analyste financier expert. Tu analyses l'action ${symbol} (${sector}) pour un investisseur qui la DÉTIENT DÉJÀ en portefeuille (aujourd'hui ${date}).\n\n${skipRule}\n\nSi des actualités récentes existent, utilise web_search pour les trouver, puis génère le briefing suivant.\n\nFocus obligatoire : risques à surveiller, signaux de sortie, news impactant directement la position.\n\nFormat OBLIGATOIRE (markdown) :\n\n## 💼 ${symbol} — ${sector} | Briefing du ${date}\n\n### 📰 Actualités récentes (< 7 jours)\n- [3 à 5 faits marquants datés]\n\n### ⚠️ Impact sur ta position\n- Risques identifiés : ...\n- Points positifs : ...\n\n### 🎯 Signal du jour\n**[CONSERVER / RENFORCER / ALLÉGER / VENDRE]** — Confiance : [Faible / Moyenne / Forte]\n\n### 📝 Verdict\n[2-3 phrases concrètes pour un investisseur qui détient déjà ce titre]`;\n} else {\n  prompt = `Tu es un analyste financier expert. Tu analyses l'action ${symbol} (${sector}) pour un investisseur qui la SURVEILLE sans l'avoir encore achetée (aujourd'hui ${date}).\n\n${skipRule}\n\nSi des actualités récentes existent, utilise web_search pour les trouver, puis génère le briefing suivant.\n\nFocus obligatoire : opportunité d'entrée, catalyseurs à venir, niveau de prix intéressant.\n\nFormat OBLIGATOIRE (markdown) :\n\n## 👀 ${symbol} — ${sector} | Briefing du ${date}\n\n### 📰 Actualités récentes (< 7 jours)\n- [3 à 5 faits marquants datés]\n\n### 💡 Opportunité d'entrée\n- Niveau de prix intéressant : ...\n- Catalyseurs à venir : ...\n\n### 🎯 Signal du jour\n**[ACHETER MAINTENANT / ATTENDRE / IGNORER]** — Confiance : [Faible / Moyenne / Forte]\n\n### 📝 Verdict\n[2-3 phrases concrètes pour un investisseur qui envisage d'acheter ce titre]`;\n}\n\nconst body = {\n  model: 'claude-sonnet-4-5',\n  max_tokens: 1024,\n  tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],\n  messages: [{ role: 'user', content: prompt }]\n};\n\nreturn [{ json: { symbol, sector, status, body } }];"
+      },
+      "id": "node-build-request",
+      "name": "Préparer requête Claude",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "anthropic-beta", "value": "web-search-2025-03-05" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "id": "node-claude-api",
+      "name": "Claude API (Anthropic)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "position": [900, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-anthropic",
+          "name": "Anthropic API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.item.json;\nconst { symbol, sector, status } = $('Préparer requête Claude').item.json;\n\nlet briefing = '';\nif (response.content && Array.isArray(response.content)) {\n  for (const block of response.content) {\n    if (block.type === 'text') briefing += block.text;\n  }\n}\n\nconst skip = !briefing || briefing.trim().toUpperCase() === 'SKIP';\nreturn [{ json: { symbol, sector, status, briefing: briefing.trim(), skip } }];"
+      },
+      "id": "node-extract-briefing",
+      "name": "Extraire briefing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const all = $input.all();\nconst totalTickers = 15;\nconst active = all.filter(i => !i.json.skip);\nconst portfolio = active.filter(i => i.json.status === 'portfolio');\nconst watchlist = active.filter(i => i.json.status === 'watchlist');\nconst date = new Date().toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\n\nif (active.length === 0) {\n  return [{ json: {\n    htmlBody: '<html><body style=\"font-family:Arial,sans-serif;padding:24px\"><p>Aucune actualité récente aujourd\\'hui.</p></body></html>',\n    subject: `📈 Veille Boursière — ${new Date().toLocaleDateString('fr-FR')} — Aucune news`\n  }}];\n}\n\nconst activeSymbols = active.map(i => i.json.symbol).join(', ');\n\nfunction esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }\n\nfunction mdToHtml(md) {\n  return md\n    .replace(/^## (.+)$/gm, '<h2 style=\"color:#1a1a2e;font-size:18px;margin:20px 0 8px\">$1</h2>')\n    .replace(/^### (.+)$/gm, '<h3 style=\"color:#444;font-size:15px;margin:14px 0 6px\">$1</h3>')\n    .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')\n    .replace(/^- (.+)$/gm, '<li>$1</li>')\n    .replace(/(<li>.*<\\/li>\\n?)+/g, s => '<ul style=\"margin:4px 0 8px 20px\">' + s + '</ul>')\n    .replace(/\\n{2,}/g, '</p><p>')\n    .replace(/\\n/g, '<br>');\n}\n\nfunction renderSection(title, items) {\n  if (!items.length) return '';\n  let html = `<h2 style=\"color:#1a1a2e;font-size:20px;margin:32px 0 12px;padding-bottom:6px;border-bottom:3px solid #e94560\">${title} <span style=\"font-size:13px;color:#888;font-weight:normal\">(${items.length} action${items.length>1?'s':''})</span></h2>`;\n  for (const item of items) {\n    html += `<div style=\"margin:16px 0;padding:16px 20px;background:#f9f9f9;border-left:4px solid #e94560;border-radius:3px\">${mdToHtml(item.json.briefing)}</div>`;\n  }\n  return html;\n}\n\nconst body = `<html><body style=\"font-family:Arial,sans-serif;max-width:820px;margin:auto;padding:24px;color:#222\">\n<h1 style=\"color:#1a1a2e;font-size:24px;border-bottom:3px solid #e94560;padding-bottom:10px\">📈 Veille Boursière — ${date}</h1>\n<div style=\"background:#e8f4fd;border-left:4px solid #2196F3;padding:12px 16px;margin:16px 0;font-size:14px\">\n  📊 <strong>${active.length} action${active.length>1?'s':''} sur ${totalTickers} ont des actualités aujourd'hui :</strong> ${activeSymbols}\n</div>\n${renderSection('📊 MON PORTEFEUILLE', portfolio)}\n${renderSection('👀 MA WATCHLIST', watchlist)}\n<p style=\"color:#bbb;font-size:11px;margin-top:32px;border-top:1px solid #eee;padding-top:10px\">Généré par votre agent de veille boursière n8n + Claude</p>\n</body></html>`;\n\nreturn [{ json: {\n  htmlBody: body,\n  subject: `📈 Veille Boursière — ${new Date().toLocaleDateString('fr-FR')} — ${active.length}/${totalTickers} news`\n}}];"
+      },
+      "id": "node-aggregate-email",
+      "name": "Agréger pour Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 160]
+    },
+    {
+      "parameters": {
+        "fromEmail": "codeartch@gmail.com",
+        "toEmail": "codeartch@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.htmlBody }}",
+        "options": {}
+      },
+      "id": "node-gmail",
+      "name": "Envoyer Gmail",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1560, 160],
+      "credentials": {
+        "smtp": {
+          "id": "cred-gmail",
+          "name": "Gmail SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const all = $input.all();\nconst active = all.filter(i => !i.json.skip);\nreturn active.map(i => ({ json: { symbol: i.json.symbol, briefing: i.json.briefing } }));"
+      },
+      "id": "node-aggregate-telegram",
+      "name": "Agréger pour Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { symbol, briefing } = $input.item.json;\nconst MAX = 4000;\n\nif (briefing.length <= MAX) {\n  return [{ json: { chunk: briefing } }];\n}\n\nconst paragraphs = briefing.split(/\\n\\n+/);\nconst chunks = [];\nlet current = '';\n\nfor (const para of paragraphs) {\n  const candidate = current ? current + '\\n\\n' + para : para;\n  if (candidate.length > MAX) {\n    if (current) chunks.push(current);\n    if (para.length > MAX) {\n      const lines = para.split('\\n');\n      let sub = '';\n      for (const line of lines) {\n        const c = sub ? sub + '\\n' + line : line;\n        if (c.length > MAX) { if (sub) chunks.push(sub); sub = line; }\n        else sub = c;\n      }\n      current = sub;\n    } else {\n      current = para;\n    }\n  } else {\n    current = candidate;\n  }\n}\nif (current) chunks.push(current);\n\nreturn chunks.map((chunk, i) => ({\n  json: { chunk: chunks.length > 1 ? `_(${i+1}/${chunks.length})_\\n\\n${chunk}` : chunk }\n}));"
+      },
+      "id": "node-split-telegram",
+      "name": "Découper pour Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 420]
+    },
+    {
+      "parameters": {
+        "chatId": "1543956122",
+        "text": "={{ $json.chunk }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "node-telegram",
+      "name": "Envoyer Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1780, 420],
+      "credentials": {
+        "telegramApi": { "id": "cred-telegram", "name": "Telegram Bot API" }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule 8h Lun-Ven": {
+      "main": [[{ "node": "Lire tickers", "type": "main", "index": 0 }]]
+    },
+    "Lire tickers": {
+      "main": [[{ "node": "Préparer requête Claude", "type": "main", "index": 0 }]]
+    },
+    "Préparer requête Claude": {
+      "main": [[{ "node": "Claude API (Anthropic)", "type": "main", "index": 0 }]]
+    },
+    "Claude API (Anthropic)": {
+      "main": [[{ "node": "Extraire briefing", "type": "main", "index": 0 }]]
+    },
+    "Extraire briefing": {
+      "main": [[
+        { "node": "Agréger pour Email", "type": "main", "index": 0 },
+        { "node": "Agréger pour Telegram", "type": "main", "index": 0 }
+      ]]
+    },
+    "Agréger pour Email": {
+      "main": [[{ "node": "Envoyer Gmail", "type": "main", "index": 0 }]]
+    },
+    "Agréger pour Telegram": {
+      "main": [[{ "node": "Découper pour Telegram", "type": "main", "index": 0 }]]
+    },
+    "Découper pour Telegram": {
+      "main": [[{ "node": "Envoyer Telegram", "type": "main", "index": 0 }]]
+    }
+  },
+  "id": "veille-boursiere-001",
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "1",
+  "meta": { "instanceId": "stock-tracker" },
+  "tags": [{ "name": "bourse", "createdAt": "2026-04-30T00:00:00.000Z", "updatedAt": "2026-04-30T00:00:00.000Z" }]
+}

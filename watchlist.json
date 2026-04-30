@@ -1,0 +1,12 @@
+{
+  "tickers": [
+    { "symbol": "SMR", "name": "NuScale Power", "sector": "Nucléaire SMR" },
+    { "symbol": "ALTD", "name": "Altitude", "sector": "Drones FR" },
+    { "symbol": "OKLO", "name": "Oklo Inc.", "sector": "Nucléaire SMR" },
+    { "symbol": "BLNK", "name": "Blink Charging", "sector": "Recharge VE" },
+    { "symbol": "GRO", "name": "Greenbrook TMS", "sector": "Santé mentale" },
+    { "symbol": "STIM", "name": "Neuronetics", "sector": "Neuromodulation" },
+    { "symbol": "PLX", "name": "Progenity", "sector": "Diagnostics moléculaires" }
+  ],
+  "updated_at": "2026-04-30"
+}

@@ -1,0 +1,13 @@
+{
+  "tickers": [
+    { "symbol": "BBAI", "name": "BigBear.ai", "sector": "IA défense" },
+    { "symbol": "HIMS", "name": "Hims & Hers Health", "sector": "Téléhealth" },
+    { "symbol": "HYLN", "name": "Hyliion Holdings", "sector": "Camions électriques" },
+    { "symbol": "MMED", "name": "Mind Medicine", "sector": "Psychédéliques thérapeutiques" },
+    { "symbol": "PRCH", "name": "Porch Group", "sector": "Assurance tech" },
+    { "symbol": "RGTI", "name": "Rigetti Computing", "sector": "Informatique quantique" },
+    { "symbol": "VUZI", "name": "Vuzix", "sector": "Smart glasses / AR" },
+    { "symbol": "XYL", "name": "Xylem", "sector": "Gestion de l'eau" }
+  ],
+  "updated_at": "2026-04-30"
+}
