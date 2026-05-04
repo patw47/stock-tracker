@@ -4,7 +4,7 @@
     {
       "parameters": {
         "rule": {
-          "interval": [{ "field": "cronExpression", "expression": "0 14 * * *" }]
+          "interval": [{ "field": "cronExpression", "expression": "0 10 * * *" }]
         }
       },
       "id": "node-schedule",
@@ -173,7 +173,7 @@
   },
   "id": "veille-boursiere-001",
   "active": false,
-  "settings": { "executionOrder": "v1" },
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Paris" },
   "versionId": "1",
   "meta": { "instanceId": "stock-tracker" },
   "tags": [{ "name": "bourse", "createdAt": "2026-04-30T00:00:00.000Z", "updatedAt": "2026-04-30T00:00:00.000Z" }]
