@@ -4,14 +4,22 @@
     {
       "parameters": {
         "rule": {
-          "interval": [{ "field": "cronExpression", "expression": "0 10 * * *" }]
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * *"
+            }
+          ]
         }
       },
       "id": "node-schedule",
       "name": "Schedule 8h Lun-Ven",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [240, 300]
+      "position": [
+        240,
+        300
+      ]
     },
     {
       "parameters": {
@@ -21,17 +29,23 @@
       "name": "Lire tickers",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [460, 300]
+      "position": [
+        460,
+        300
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const { symbol, sector, status } = $input.item.json;\nawait new Promise(r => setTimeout(r, 2000));\nconst date = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });\n\nconst skipRule = `RÈGLE ABSOLUE N°1 : Si tu ne trouves aucune actualité datant de moins de 7 jours sur ${symbol}, réponds UNIQUEMENT le mot : SKIP\\nRÈGLE ABSOLUE N°2 : Ne répète pas une actualité déjà couverte dans un briefing précédent. Si tu n'as rien de nouveau à dire, réponds UNIQUEMENT le mot : SKIP\\nSi l'une de ces deux règles s'applique, ta réponse doit être exclusivement : SKIP (rien d'autre).`;\n\nlet prompt;\nif (status === 'portfolio') {\n  prompt = `Tu es un analyste financier expert. Tu analyses l'action ${symbol} (${sector}) pour un investisseur qui la DÉTIENT DÉJÀ en portefeuille (aujourd'hui ${date}).\n\n${skipRule}\n\nSi des actualités récentes existent, utilise web_search pour les trouver, puis génère le briefing suivant.\n\nFocus obligatoire : risques à surveiller, signaux de sortie, news impactant directement la position.\n\nFormat OBLIGATOIRE (markdown) :\n\n## 💼 ${symbol} — ${sector} | Briefing du ${date}\n\n### 📰 Actualités récentes (< 7 jours)\n- [3 à 5 faits marquants datés]\n\n### ⚠️ Impact sur ta position\n- Risques identifiés : ...\n- Points positifs : ...\n\n### 🎯 Signal du jour\n**[CONSERVER / RENFORCER / ALLÉGER / VENDRE]** — Confiance : [Faible / Moyenne / Forte]\n\n### 📝 Verdict\n[2-3 phrases concrètes pour un investisseur qui détient déjà ce titre]`;\n} else {\n  prompt = `Tu es un analyste financier expert. Tu analyses l'action ${symbol} (${sector}) pour un investisseur qui la SURVEILLE sans l'avoir encore achetée (aujourd'hui ${date}).\n\n${skipRule}\n\nSi des actualités récentes existent, utilise web_search pour les trouver, puis génère le briefing suivant.\n\nFocus obligatoire : opportunité d'entrée, catalyseurs à venir, niveau de prix intéressant.\n\nFormat OBLIGATOIRE (markdown) :\n\n## 👀 ${symbol} — ${sector} | Briefing du ${date}\n\n### 📰 Actualités récentes (< 7 jours)\n- [3 à 5 faits marquants datés]\n\n### 💡 Opportunité d'entrée\n- Niveau de prix intéressant : ...\n- Catalyseurs à venir : ...\n\n### 🎯 Signal du jour\n**[ACHETER MAINTENANT / ATTENDRE / IGNORER]** — Confiance : [Faible / Moyenne / Forte]\n\n### 📝 Verdict\n[2-3 phrases concrètes pour un investisseur qui envisage d'acheter ce titre]`;\n}\n\nconst body = {\n  model: 'claude-sonnet-4-5',\n  max_tokens: 1024,\n  tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],\n  messages: [{ role: 'user', content: prompt }]\n};\n\nreturn [{ json: { symbol, sector, status, body } }];"
+        "jsCode": "const { symbol, sector, status } = $input.item.json;\nawait new Promise(r => setTimeout(r, 3000));\nconst date = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });\n\nlet prompt;\nif (status === 'portfolio') {\n  prompt = `Tu es un analyste financier expert. Analyse l'action ${symbol} (${sector}) pour un investisseur qui la DÉTIENT DÉJÀ en portefeuille (aujourd'hui ${date}).\n\nÉTAPE 1 — OBLIGATOIRE : Utilise immédiatement web_search avec la requête \"${symbol} stock news 2026\" pour trouver les actualités récentes. Tu NE PEUX PAS répondre sans avoir d'abord effectué cette recherche web.\n\nÉTAPE 2 — Après avoir vu les résultats de recherche :\n- Si les résultats ne contiennent aucune information pertinente sur ${symbol} → réponds UNIQUEMENT : SKIP\n- Sinon → génère le briefing ci-dessous en te basant sur les résultats trouvés.\n\nFocus : risques à surveiller, signaux de sortie, news impactant directement la position.\n\n## 💼 ${symbol} — ${sector} | Briefing du ${date}\n\n### 📰 Actualités récentes\n- [3 à 5 faits marquants datés issus de la recherche web]\n\n### ⚠️ Impact sur ta position\n- Risques identifiés : ...\n- Points positifs : ...\n\n### 🎯 Signal du jour\n**[CONSERVER / RENFORCER / ALLÉGER / VENDRE]** — Confiance : [Faible / Moyenne / Forte]\n\n### 📝 Verdict\n[2-3 phrases concrètes pour un investisseur qui détient déjà ce titre]`;\n} else {\n  prompt = `Tu es un analyste financier expert. Analyse l'action ${symbol} (${sector}) pour un investisseur qui la SURVEILLE sans l'avoir encore achetée (aujourd'hui ${date}).\n\nÉTAPE 1 — OBLIGATOIRE : Utilise immédiatement web_search avec la requête \"${symbol} stock news 2026\" pour trouver les actualités récentes. Tu NE PEUX PAS répondre sans avoir d'abord effectué cette recherche web.\n\nÉTAPE 2 — Après avoir vu les résultats de recherche :\n- Si les résultats ne contiennent aucune information pertinente sur ${symbol} → réponds UNIQUEMENT : SKIP\n- Sinon → génère le briefing ci-dessous en te basant sur les résultats trouvés.\n\nFocus : opportunité d'entrée, catalyseurs à venir, niveau de prix intéressant.\n\n## 👀 ${symbol} — ${sector} | Briefing du ${date}\n\n### 📰 Actualités récentes\n- [3 à 5 faits marquants datés issus de la recherche web]\n\n### 💡 Opportunité d'entrée\n- Niveau de prix intéressant : ...\n- Catalyseurs à venir : ...\n\n### 🎯 Signal du jour\n**[ACHETER MAINTENANT / ATTENDRE / IGNORER]** — Confiance : [Faible / Moyenne / Forte]\n\n### 📝 Verdict\n[2-3 phrases concrètes pour un investisseur qui envisage d'acheter ce titre]`;\n}\n\nconst body = {\n  model: 'claude-sonnet-4-5',\n  max_tokens: 2048,\n  tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],\n  messages: [{ role: 'user', content: prompt }]\n};\n\nreturn [{ json: { symbol, sector, status, body } }];"
       },
       "id": "node-build-request",
       "name": "Préparer requête Claude",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [680, 300]
+      "position": [
+        680,
+        300
+      ]
     },
     {
       "parameters": {
@@ -42,8 +56,14 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "anthropic-version", "value": "2023-06-01" },
-            { "name": "anthropic-beta", "value": "web-search-2025-03-05" }
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "anthropic-beta",
+              "value": "web-search-2025-03-05"
+            }
           ]
         },
         "sendBody": true,
@@ -56,7 +76,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "continueOnFail": true,
-      "position": [900, 300],
+      "position": [
+        900,
+        300
+      ],
       "credentials": {
         "httpHeaderAuth": {
           "id": "cred-anthropic",
@@ -72,7 +95,10 @@
       "name": "Extraire briefing",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 300]
+      "position": [
+        1120,
+        300
+      ]
     },
     {
       "parameters": {
@@ -83,7 +109,10 @@
       "name": "Agréger pour Email",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1340, 160]
+      "position": [
+        1340,
+        160
+      ]
     },
     {
       "parameters": {
@@ -97,7 +126,10 @@
       "name": "Envoyer Gmail",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [1560, 160],
+      "position": [
+        1560,
+        160
+      ],
       "credentials": {
         "smtp": {
           "id": "cred-gmail",
@@ -114,7 +146,10 @@
       "name": "Agréger pour Telegram",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1340, 420]
+      "position": [
+        1340,
+        420
+      ]
     },
     {
       "parameters": {
@@ -124,57 +159,145 @@
       "name": "Découper pour Telegram",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1560, 420]
+      "position": [
+        1560,
+        420
+      ]
     },
     {
       "parameters": {
         "chatId": "1543956122",
         "text": "={{ $json.chunk }}",
-        "additionalFields": { "parse_mode": "Markdown" }
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
       },
       "id": "node-telegram",
       "name": "Envoyer Telegram",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1780, 420],
+      "position": [
+        1780,
+        420
+      ],
       "credentials": {
-        "telegramApi": { "id": "cred-telegram", "name": "Telegram Bot API" }
+        "telegramApi": {
+          "id": "cred-telegram",
+          "name": "Telegram Bot API"
+        }
       }
     }
   ],
   "connections": {
     "Schedule 8h Lun-Ven": {
-      "main": [[{ "node": "Lire tickers", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Lire tickers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Lire tickers": {
-      "main": [[{ "node": "Préparer requête Claude", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Préparer requête Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Préparer requête Claude": {
-      "main": [[{ "node": "Claude API (Anthropic)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Claude API (Anthropic)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Claude API (Anthropic)": {
-      "main": [[{ "node": "Extraire briefing", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Extraire briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Extraire briefing": {
-      "main": [[
-        { "node": "Agréger pour Email", "type": "main", "index": 0 },
-        { "node": "Agréger pour Telegram", "type": "main", "index": 0 }
-      ]]
+      "main": [
+        [
+          {
+            "node": "Agréger pour Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Agréger pour Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Agréger pour Email": {
-      "main": [[{ "node": "Envoyer Gmail", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Envoyer Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Agréger pour Telegram": {
-      "main": [[{ "node": "Découper pour Telegram", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Découper pour Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Découper pour Telegram": {
-      "main": [[{ "node": "Envoyer Telegram", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Envoyer Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "id": "veille-boursiere-001",
   "active": false,
-  "settings": { "executionOrder": "v1", "timezone": "Europe/Paris" },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Paris"
+  },
   "versionId": "1",
-  "meta": { "instanceId": "stock-tracker" },
-  "tags": [{ "name": "bourse", "createdAt": "2026-04-30T00:00:00.000Z", "updatedAt": "2026-04-30T00:00:00.000Z" }]
+  "meta": {
+    "instanceId": "stock-tracker"
+  },
+  "tags": [
+    {
+      "name": "bourse",
+      "createdAt": "2026-04-30T00:00:00.000Z",
+      "updatedAt": "2026-04-30T00:00:00.000Z"
+    }
+  ]
 }
