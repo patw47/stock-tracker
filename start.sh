@@ -18,7 +18,7 @@ export N8N_BASIC_AUTH_ACTIVE=true
 export N8N_BASIC_AUTH_USER=admin
 export N8N_BASIC_AUTH_PASSWORD=stockwatcher2026
 export WATCHLIST_PATH="$SCRIPT_DIR/watchlist.json"
-export N8N_USER_FOLDER="$SCRIPT_DIR/.n8n-data"
+export N8N_USER_FOLDER="$SCRIPT_DIR"
 export GENERIC_TIMEZONE="Europe/Paris"
 export N8N_DEFAULT_LOCALE=fr
 
