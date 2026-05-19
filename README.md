@@ -1,66 +1,73 @@
-# Stock Tracker — Daily AI-Powered Stock Briefing Agent
+# Stock Tracker — Daily AI-Powered Stock Briefing
 
-Automated stock monitoring agent built with **n8n** + **Claude AI** (Anthropic).  
-Every weekday morning, it runs a web-search-backed analysis on each ticker and delivers a full briefing via **Telegram** and **Gmail**.
-
----
-
-## Features
-
-- **Portfolio vs watchlist logic** — different prompts depending on whether you hold the stock or just monitor it
-- **Mandatory web search** — Claude uses `web_search` before any decision; SKIP only allowed after a real search
-- **Auto-split Telegram messages** — long briefings split automatically at 4,000 characters
-- **Email digest** — one Gmail recap with a Portfolio section and a Watchlist section
-- **Scheduled daily** — runs at 10:00 AM Paris time (Europe/Paris), Monday–Friday
-- **PM2 managed** — auto-restart on crash and on server reboot
+Automated stock monitoring system built with **n8n** + **Claude Haiku** + **Warren** (OpenClaw agent).  
+Every weekday morning it searches for fresh news on each ticker, filters out duplicates via per-ticker memory, synthesizes a French executive briefing, and delivers it via **Telegram** and **Gmail**.
 
 ---
 
 ## How it works
 
 ```
-Schedule (10:00 Paris) → Read tickers → Build Claude request → Claude API (web_search)
-                                                                       ↓
-                                                              Extract briefing
-                                                              ├── Aggregate Email → Gmail
-                                                              └── Aggregate Telegram → Split → Telegram
+Schedule (08:00 Paris, Mon–Fri)
+         │
+         ▼
+  Read 15 tickers (8 portfolio + 7 watchlist)
+         │
+         ▼  × 15 parallel calls
+  Claude Haiku + web_search
+  "Any news on TICKER from TODAY?"
+  max 3 searches · 512 tokens
+         │
+         ▼
+  Aggregate all raw news
+         │
+         ▼
+  Warren Call 1 — ticker-watch  (POST /filter)
+  Reads memory/tickers/SYMBOL.md (last 3 entries)
+  Returns { new: [...], skip: [...] }
+         │
+         ▼ new tickers only
+  Warren Call 2 — executive-synthesis  (POST /synthesize)
+  French Markdown briefing
+  Writes memory for each new ticker
+         │
+    ┌────┴────┐
+    ▼         ▼
+  Gmail     Telegram
 ```
 
-Estimated runtime: **4–6 minutes** (15 tickers × ~20s per Claude call with web_search).
+**SKIP logic** — a ticker is skipped if:
+- Haiku found no news from today
+- Today's news is semantically identical to an existing memory entry (duplicate)
+
+If no ticker is NEW → pipeline stops. No email, no message.
+
+**Estimated cost**: ~$0.008/day (15 Haiku calls + 2 Warren calls)  
+**Estimated runtime**: ~90 seconds
 
 ---
 
-## Customizing your tickers
+## Features
 
-Edit `portfolio.json` for stocks you **own**, and `watchlist.json` for stocks you **monitor**.
+- **Date-filtered news** — Haiku searches for today's news only; stale articles are ignored
+- **Duplicate memory** — Warren compares each ticker's news against the last 3 days of entries
+- **Two-stage Warren** — Call 1 (filter) and Call 2 (synthesis) are separate for maintainability
+- **Per-ticker memory** — `memory/tickers/SYMBOL.md`, 3 entries max, written only when content is genuinely new
+- **Sector clustering** — SMR+OKLO, MMED+STIM+GRO, BBAI+VUZI+RGTI, HYLN+BLNK synthesized together
+- **Auto-split Telegram** — messages split at 4,000 characters at paragraph boundaries
+- **systemd managed** — three services: n8n, OpenClaw gateway, Warren HTTP bridge
 
-**`portfolio.json`**
-```json
-{
-  "tickers": [
-    { "symbol": "AAPL", "name": "Apple Inc.", "sector": "Technology" },
-    { "symbol": "TSLA", "name": "Tesla Inc.", "sector": "EV / Energy" }
-  ],
-  "updated_at": "2026-05-17"
-}
-```
+---
 
-**`watchlist.json`**
-```json
-{
-  "tickers": [
-    { "symbol": "NVDA", "name": "NVIDIA Corporation", "sector": "Semiconductors" },
-    { "symbol": "PLTR", "name": "Palantir Technologies", "sector": "AI / Defense" }
-  ],
-  "updated_at": "2026-05-17"
-}
-```
+## Stack
 
-Rules:
-- `symbol` must be a valid US stock ticker (e.g. `AAPL`, `TSLA`)
-- `name` and `sector` are used in the Claude prompt — be descriptive for better analysis
-- No limit on number of tickers, but each adds ~20s to the daily run
-- After editing, no restart needed — files are read at each workflow execution
+| Component | Role |
+|---|---|
+| **n8n** (self-hosted) | Scheduling, API calls, credential management, delivery |
+| **Claude Haiku** (`claude-haiku-4-5-20251001`) | Per-ticker raw news search via `web_search` |
+| **OpenClaw** | Agent framework wrapping Claude Haiku for Warren |
+| **Warren** (OpenClaw agent) | Intelligence layer — filtering, memory, French synthesis |
+| **warren_server.py** | Python HTTP bridge between n8n and OpenClaw CLI (port 18795) |
 
 ---
 
@@ -68,54 +75,109 @@ Rules:
 
 ```
 stock-tracker/
-├── workflow.json          # n8n workflow (import directly)
-├── ecosystem.config.js    # PM2 config (port, timezone, data folder)
-├── start.sh               # Manual start script (alternative to PM2)
-├── portfolio.json         # Stocks you own
-├── watchlist.json         # Stocks you monitor
+├── workflow.json          # n8n workflow — import this
+├── warren_server.py       # Python HTTP bridge (port 18795)
 ├── .env                   # Environment variables (not versioned)
-└── .n8n/                  # n8n database (not versioned)
+└── n8n-data/              # n8n database and config (not versioned)
+
+/home/warren/.openclaw/workspace-warren/
+├── BOOTSTRAP.md           # Warren system prompt / identity
+├── SOUL.md                # Warren behavioral principles
+├── PROMPT.md              # Skill modes documentation
+├── ARCHITECTURE.md        # Pipeline documentation
+├── TOOLS.md               # Credentials, paths, endpoints
+├── skills/
+│   ├── ticker-watch/      # Filter skill (NEW vs SKIP)
+│   └── executive-synthesis/ # Synthesis skill (French briefing)
+└── memory/
+    └── tickers/           # SYMBOL.md — last 3 raw news entries
 ```
 
 ---
 
-## Installation on a VPS (Ubuntu 22.04+)
+## VPS Installation (Ubuntu 22.04+)
 
-### 1. Connect to your VPS
+### Prerequisites
+
+- Ubuntu 22.04 VPS (2 GB RAM minimum)
+- A dedicated system user for the app (recommended: `warren`)
+- Your Anthropic API key, Gmail app password, Telegram bot token
+
+---
+
+### 1. Create system user
 
 ```bash
-ssh user@your-vps-ip
+sudo useradd -m -s /bin/bash warren
+sudo usermod -aG sudo warren  # optional — remove after setup if desired
 ```
 
-### 2. Install Node.js via nvm
+---
+
+### 2. Install Node.js
 
 ```bash
+# As warren user (or any user that will run n8n)
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 source ~/.bashrc
 nvm install 22
-node -v  # should print v22.x.x
+node -v   # v22.x.x
 ```
 
-### 3. Install n8n and PM2
+Or system-wide via NodeSource:
 
 ```bash
-npm install -g n8n pm2
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
 ```
 
-### 4. Clone the repository
+---
+
+### 3. Install n8n
 
 ```bash
-git clone https://github.com/patw47/stock-tracker.git
-cd stock-tracker
+sudo npm install -g n8n
+n8n --version
 ```
 
-### 5. Configure environment variables
+---
 
-Create your `.env` file:
+### 4. Install OpenClaw
+
+OpenClaw is the agent framework that runs Warren. Install it globally:
 
 ```bash
-cp .env.example .env
-nano .env
+sudo npm install -g openclaw
+# or: npm install -g @openclaw/cli  (check current package name)
+openclaw --version
+```
+
+Then configure OpenClaw for the `warren` user:
+
+```bash
+sudo -u warren openclaw init
+```
+
+This creates `/home/warren/.openclaw/` with the default config.
+
+---
+
+### 5. Clone the repository
+
+```bash
+sudo mkdir -p /opt/apps/stock-tracker
+sudo chown warren:warren /opt/apps/stock-tracker
+sudo -u warren git clone https://github.com/patw47/stock-tracker.git /opt/apps/stock-tracker
+cd /opt/apps/stock-tracker
+```
+
+---
+
+### 6. Configure environment variables
+
+```bash
+sudo -u warren cp .env.example .env
+sudo -u warren nano .env
 ```
 
 Fill in:
@@ -123,99 +185,297 @@ Fill in:
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
 GMAIL_USER=your@gmail.com
-GMAIL_PASS=xxxx xxxx xxxx xxxx   # Gmail App Password (not your account password)
+GMAIL_PASS=xxxxxxxxxxxxxxxxxxxx    # 16-char App Password, NO spaces
 TELEGRAM_TOKEN=123456789:ABC...
 TELEGRAM_CHAT_ID=1234567890
+N8N_PORT=5680
+N8N_USER_FOLDER=/opt/apps/stock-tracker/n8n-data
+N8N_BASIC_AUTH_ACTIVE=true
+N8N_BASIC_AUTH_USER=admin
+N8N_BASIC_AUTH_PASSWORD=your-password
+GENERIC_TIMEZONE=Europe/Paris
+N8N_DEFAULT_LOCALE=fr
+N8N_ENCRYPTION_KEY=$(openssl rand -base64 32)
 ```
 
-> **Gmail App Password**: go to Google Account → Security → 2-Step Verification → App passwords.  
-> **Telegram**: create a bot via [@BotFather](https://t.me/BotFather), then get your chat ID via [@userinfobot](https://t.me/userinfobot).
+> **Gmail App Password**: Google Account → Security → 2-Step Verification → App passwords. Copy the 16-char password **without spaces**.  
+> **Telegram**: create a bot via [@BotFather](https://t.me/BotFather), get your chat ID via [@userinfobot](https://t.me/userinfobot).
 
-### 6. Update ecosystem.config.js with your username
+---
 
-Edit the `N8N_USER_FOLDER` path in `ecosystem.config.js`:
+### 7. Set up Warren workspace
 
-```js
-N8N_USER_FOLDER: '/home/YOUR_USERNAME/stock-tracker',
-```
-
-### 7. Start with PM2
+Copy the workspace files to the OpenClaw directory:
 
 ```bash
-pm2 start ecosystem.config.js
-pm2 save
+sudo cp -r /opt/apps/stock-tracker/workspace-warren \
+  /home/warren/.openclaw/workspace-warren
+sudo chown -R warren:warren /home/warren/.openclaw/workspace-warren
 ```
 
-Enable auto-start on server reboot (run once, requires sudo):
+Create the memory directory:
 
 ```bash
-pm2 startup
-# copy-paste the command it prints, then run:
-pm2 save
+sudo -u warren mkdir -p /home/warren/.openclaw/workspace-warren/memory/tickers
 ```
 
-### 8. Import the workflow
+Register Warren as an OpenClaw agent:
 
 ```bash
-N8N_USER_FOLDER=/home/YOUR_USERNAME/stock-tracker \
-  n8n import:workflow --input=workflow.json
+sudo -u warren openclaw agent add warren \
+  --workspace /home/warren/.openclaw/workspace-warren \
+  --model claude-haiku-4-5-20251001
 ```
 
-### 9. Open the n8n UI
+Verify:
 
-Navigate to `http://your-vps-ip:5680` in your browser.  
-Login: `admin` / `stockwatcher2026`
+```bash
+sudo -u warren openclaw agent list   # warren should appear
+```
 
-### 10. Configure credentials in the n8n UI
+---
+
+### 8. Configure OpenClaw with your Anthropic key
+
+```bash
+sudo -u warren openclaw config set anthropic.apiKey sk-ant-...
+# or edit /home/warren/.openclaw/openclaw.json directly
+```
+
+---
+
+### 9. Set up systemd services
+
+#### n8n service
+
+```bash
+sudo nano /etc/systemd/system/stock-tracker.service
+```
+
+```ini
+[Unit]
+Description=Stock Tracker — n8n
+After=network.target
+
+[Service]
+Type=simple
+User=warren
+WorkingDirectory=/opt/apps/stock-tracker
+EnvironmentFile=/opt/apps/stock-tracker/.env
+ExecStart=/usr/bin/n8n start
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+#### OpenClaw gateway service
+
+```bash
+sudo nano /etc/systemd/system/openclaw-warren.service
+```
+
+```ini
+[Unit]
+Description=OpenClaw Warren Gateway
+After=network.target
+
+[Service]
+Type=simple
+User=warren
+Environment=HOME=/home/warren
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/openclaw gateway start --agent warren
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+#### Warren HTTP bridge service
+
+```bash
+sudo nano /etc/systemd/system/warren-server.service
+```
+
+```ini
+[Unit]
+Description=Warren HTTP Bridge — n8n to OpenClaw
+After=network.target openclaw-warren.service
+Wants=openclaw-warren.service
+
+[Service]
+Type=simple
+User=warren
+Environment=HOME=/home/warren
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 /opt/apps/stock-tracker/warren_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start all three:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable stock-tracker openclaw-warren warren-server
+sudo systemctl start openclaw-warren warren-server
+sleep 3
+sudo systemctl start stock-tracker
+```
+
+Verify:
+
+```bash
+sudo systemctl status stock-tracker openclaw-warren warren-server
+```
+
+All three should show `active (running)`.
+
+---
+
+### 10. Import the workflow into n8n
+
+```bash
+sudo -u warren \
+  N8N_USER_FOLDER=/opt/apps/stock-tracker/n8n-data \
+  N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false \
+  n8n import:workflow --input=/opt/apps/stock-tracker/workflow.json
+```
+
+Activate the workflow via SQLite (n8n import deactivates by default):
+
+```bash
+sqlite3 /opt/apps/stock-tracker/n8n-data/.n8n/database.sqlite \
+  "UPDATE workflow_entity SET active=1 WHERE id='veille-boursiere-001';"
+```
+
+Restart n8n to pick up the change:
+
+```bash
+sudo systemctl restart stock-tracker
+```
+
+---
+
+### 11. Configure credentials in the n8n UI
+
+Access the UI via SSH tunnel (n8n binds to localhost only):
+
+```bash
+ssh -L 5680:localhost:5680 warren@your-vps-ip -N
+```
+
+Then open `http://localhost:5680` in your browser.  
+Login: the values you set in `.env` (`N8N_BASIC_AUTH_USER` / `N8N_BASIC_AUTH_PASSWORD`).
 
 Go to **Credentials** and create:
 
-| Credential | Type | Details |
+| Name | Type | Settings |
 |---|---|---|
-| Anthropic API | HTTP Header Auth | Header: `x-api-key`, Value: your key |
-| Gmail SMTP | SMTP | Host: `smtp.gmail.com`, Port: `465`, SSL: on |
-| Telegram Bot | HTTP Request | Token from BotFather |
+| Header Auth account | HTTP Header Auth | Header: `x-api-key` · Value: your Anthropic key |
+| Gmail SMTP | SMTP | Host: `smtp.gmail.com` · Port: `465` · SSL: on · user/pass from `.env` |
+| Telegram account | Telegram API | Token from BotFather |
 
-### 11. Activate the workflow
-
-In the n8n UI, open the **Veille Boursière Quotidienne** workflow and toggle it **Active** (top right).
+After creating credentials, check the node IDs in the workflow match. If they don't, open each affected node and reselect the credential from the dropdown.
 
 ---
 
-## PM2 reference
+### 12. Smoke test
+
+Test the Warren HTTP bridge directly:
 
 ```bash
-pm2 status                  # check running processes
-pm2 logs stock-tracker      # view live logs
-pm2 restart stock-tracker   # restart after config changes
-pm2 stop stock-tracker      # stop
+# Test filter endpoint
+curl -s -X POST http://127.0.0.1:18795/filter \
+  -H 'Content-Type: application/json' \
+  -d '{"news":{"OKLO":"NO_NEWS_TODAY","SMR":"NuScale signs PPA with Azure today"}}' \
+  | python3 -m json.tool
+
+# Expected: {"new": ["SMR"], "skip": ["OKLO"], "reasons": {...}}
+```
+
+Test n8n is up:
+
+```bash
+curl -s http://localhost:5680/healthz
+# Expected: {"status":"ok"}
 ```
 
 ---
 
-## Environment variables
+## Customizing tickers
+
+Tickers are hardcoded in the **Lire tickers** node of the workflow. Edit them in the n8n UI:
+
+1. Open the workflow
+2. Click **Lire tickers**
+3. Edit the `portfolio` and `watchlist` arrays in the JS code
+4. Save
+
+Each ticker needs: `symbol`, `sector`, `status` (`"portfolio"` or `"watchlist"`).
+
+---
+
+## Warren memory
+
+Warren stores raw news per ticker in `/home/warren/.openclaw/workspace-warren/memory/tickers/`.
+
+- One file per ticker: `SYMBOL.md`
+- Max 3 entries, newest first, separated by `---`
+- Written only when new content is confirmed (after synthesis)
+- To reset a ticker's memory: `rm memory/tickers/SYMBOL.md`
+- To reset all memory: `rm memory/tickers/*.md`
+
+---
+
+## Service management
+
+```bash
+# Status
+sudo systemctl status stock-tracker warren-server openclaw-warren
+
+# Restart all
+sudo systemctl restart openclaw-warren warren-server stock-tracker
+
+# Logs
+sudo journalctl -u warren-server -f       # Python bridge logs
+sudo journalctl -u stock-tracker -f       # n8n logs
+sudo journalctl -u openclaw-warren -f     # OpenClaw logs
+```
+
+---
+
+## Environment variables reference
 
 | Variable | Description |
 |---|---|
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `GMAIL_USER` | Sender Gmail address |
-| `GMAIL_PASS` | Gmail App Password |
+| `ANTHROPIC_API_KEY` | Anthropic API key (used by Haiku calls in n8n) |
+| `GMAIL_USER` | Gmail sender address |
+| `GMAIL_PASS` | Gmail App Password — 16 chars, **no spaces** |
 | `TELEGRAM_TOKEN` | Telegram bot token |
-| `TELEGRAM_CHAT_ID` | Target Telegram chat ID |
+| `TELEGRAM_CHAT_ID` | Target chat ID |
+| `N8N_PORT` | n8n HTTP port (default: `5680`) |
+| `N8N_USER_FOLDER` | n8n data directory |
+| `N8N_BASIC_AUTH_USER` | n8n login username |
+| `N8N_BASIC_AUTH_PASSWORD` | n8n login password |
+| `N8N_ENCRYPTION_KEY` | Credentials encryption key (generate once, never change) |
+| `GENERIC_TIMEZONE` | Timezone for scheduling (e.g. `Europe/Paris`) |
 
 ---
 
-## PM2 / n8n config (`ecosystem.config.js`)
+## Architecture decisions
 
-| Variable | Value |
-|---|---|
-| `N8N_PORT` | `5680` |
-| `N8N_USER_FOLDER` | `/home/<user>/stock-tracker` |
-| `N8N_BASIC_AUTH_USER` | `admin` |
-| `GENERIC_TIMEZONE` | `Europe/Paris` |
+See `/home/warren/.openclaw/workspace-warren/DECISIONS.md` for the full decision log.
 
----
-
-## Model
-
-`claude-sonnet-4-5` with `web_search_20250305` (Anthropic beta tool) — max 5 searches per ticker, 2,048 output tokens per analysis.
+Key choices:
+- **Haiku for search** — cheaper, faster, sufficient for raw news retrieval (512 tokens vs 2048)
+- **Two Warren calls** — filter and synthesis separated for testability and fail-safety
+- **Memory = raw news** — storing Haiku output (not Warren synthesis) for stable duplicate comparison
+- **warren_server.py** — Python bridge needed because n8n sandboxes `fs` and `child_process` modules
+- **systemd over PM2** — PM2 not available on this VPS; systemd provides equivalent reliability
