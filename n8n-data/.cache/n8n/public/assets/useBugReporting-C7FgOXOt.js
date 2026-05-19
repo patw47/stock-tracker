@@ -1,0 +1,23 @@
+(function(){try{var e=typeof window<`u`?window:typeof global<`u`?global:typeof globalThis<`u`?globalThis:typeof self<`u`?self:{};e.SENTRY_RELEASE={id:`n8n@2.20.10`}}catch{}})();try{(function(){var e=typeof window<`u`?window:typeof global<`u`?global:typeof globalThis<`u`?globalThis:typeof self<`u`?self:{},t=new e.Error().stack;t&&(e._sentryDebugIds=e._sentryDebugIds||{},e._sentryDebugIds[t]=`6c555c96-0116-49dd-a6fb-93396f682a8b`,e._sentryDebugIdIdentifier=`sentry-dbid-6c555c96-0116-49dd-a6fb-93396f682a8b`)})()}catch{}import{Ft as e,S as t}from"./vue.runtime.esm-bundler-D_yZoh5k.js";import{It as n}from"./src-Hv_-DGWn.js";import{T as r,t as i}from"./useRootStore-CfBbjnPV.js";import{$t as a,t as o}from"./settings.store-D3ibO8eV.js";var s=r(`instanceRegistry`,()=>{let n=i(),r=e(null),o=t(()=>r.value!==null);async function s(){try{r.value=await a(n.restApiContext)}catch(e){console.debug(`Failed to fetch instance registry cluster info`,e)}}return{clusterInfo:r,isAvailable:o,fetchClusterInfo:s}});function c(){let e=o(),t=i(),r=s(),{isTouchDevice:a,userAgent:c}=n(),l=n=>{let r={n8nVersion:t.versionCli,platform:e.isDocker&&e.deploymentType===`cloud`?`docker (cloud)`:e.isDocker?`docker (self-hosted)`:`npm`,nodeJsVersion:e.nodeJsVersion,nodeEnv:e.nodeEnv,database:e.databaseType===`postgresdb`?`postgres`:e.databaseType,executionMode:e.isQueueModeEnabled?e.isMultiMain?`scaling (multi-main)`:`scaling (single-main)`:`regular`,concurrency:e.settings.concurrency,license:e.isCommunityPlan||!e.settings.license?`community`:e.settings.license.environment===`production`?`enterprise (production)`:`enterprise (sandbox)`};return n?r:{...r,consumerId:n?void 0:e.consumerId}},u=()=>({success:e.saveDataSuccessExecution,error:e.saveDataErrorExecution,progress:e.saveDataProgressExecution,manual:e.saveManualExecutions,binaryMode:e.binaryDataMode===`default`?`memory`:e.binaryDataMode}),d=()=>e.pruning?.isEnabled?{enabled:!0,maxAge:`${e.pruning?.maxAge} hours`,maxCount:`${e.pruning?.maxCount} executions`}:{enabled:!1},f=()=>{let t={};if(e.security.blockFileAccessToN8nFiles||(t.blockFileAccessToN8nFiles=!1),e.security.secureCookie||(t.secureCookie=!1),Object.keys(t).length!==0)return t},p=()=>({userAgent:c,isTouchDevice:a}),m=()=>{let e=r.clusterInfo;if(!e)return;let t=e.instances.map(e=>({instanceKey:e.instanceKey,hostId:e.hostId,instanceType:e.instanceType,instanceRole:e.instanceRole,version:e.version})),n=[...new Set(t.map(e=>e.version))].sort(),i=Object.values(e.checks).map(e=>({check:e.check,status:e.status,warnings:e.warnings.length>0?e.warnings.map(e=>e.code).join(`; `):`-`})).sort((e,t)=>e.check.localeCompare(t.check));return{instanceCount:t.length,versions:n.join(`, `),instances:t,checks:i}},h=e=>{let t={core:l(e),storage:u(),pruning:d(),client:p()},n=f();n&&(t.security=n);let r=m();return r&&(t.cluster=r),t},g=(e,{secondaryHeader:t})=>{let n=t?`#`:``,r=`${n}# Debug info\n\n`;for(let t in e){r+=`${n}## ${t}\n\n`;let i=e[t];if(i){for(let[e,t]of Object.entries(i))if(Array.isArray(t)){r+=`- ${e}:\n`;for(let e of t){let t=Object.entries(e).map(([e,t])=>`${e}: ${t}`);r+=`  - ${t.join(`, `)}\n`}}else r+=`- ${e}: ${t}\n`;r+=`
+`}}return r},_=e=>`${e}Generated at: ${new Date().toISOString()}`;return{generateDebugInfo:({skipSensitive:e,secondaryHeader:t}={})=>_(g(h(e),{secondaryHeader:t}))}}var l={QUICKSTART_VIDEO:`https://www.youtube.com/watch?v=4cQWJViybAQ`,DOCUMENTATION:`https://docs.n8n.io?utm_source=n8n_app&utm_medium=app_sidebar`,FORUM:`https://community.n8n.io?utm_source=n8n_app&utm_medium=app_sidebar`,COURSES:`https://docs.n8n.io/courses/`},u=`https://github.com/n8n-io/n8n/issues/new?labels=bug-report`,d=`
+<!-- Please follow the template below. Skip the questions that are not relevant to you. -->
+
+## Describe the problem/error/question
+
+
+## What is the error message (if any)?
+
+
+## Please share your workflow/screenshots/recording
+
+\`\`\`
+(Select the nodes on your canvas and use the keyboard shortcuts CMD+C/CTRL+C and CMD+V/CTRL+V to copy and paste the workflow.)
+⚠️ WARNING ⚠️ If you have sensitive data in your workflow (like API keys), please remove it before sharing.
+\`\`\`
+
+
+## Share the output returned by the last node
+<!-- If you need help with data transformations, please also share your expected output. -->
+
+`;function f(){let e=c();return{getReportingURL:()=>{let t=new URL(u),n=`${d}\n${e.generateDebugInfo({skipSensitive:!0,secondaryHeader:!0})}`;return t.searchParams.append(`body`,n),t.toString()}}}export{s as i,l as n,c as r,f as t};
+//# sourceMappingURL=useBugReporting-C7FgOXOt.js.map

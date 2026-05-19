@@ -1,4 +1,5 @@
 {
+  "id": "veille-boursiere-001",
   "name": "Veille Boursière Quotidienne",
   "nodes": [
     {
@@ -7,7 +8,7 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 10 * * *"
+              "expression": "0 8 * * 1-5"
             }
           ]
         }
@@ -16,37 +17,29 @@
       "name": "Schedule 8h Lun-Ven",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [
-        240,
-        300
-      ]
+      "position": [240, 300]
     },
     {
       "parameters": {
-        "jsCode": "const portfolio = [\n  { symbol: 'BBAI', sector: 'IA défense', status: 'portfolio' },\n  { symbol: 'HIMS', sector: 'Téléhealth', status: 'portfolio' },\n  { symbol: 'HYLN', sector: 'Camions électriques', status: 'portfolio' },\n  { symbol: 'MMED', sector: 'Psychédéliques thérapeutiques', status: 'portfolio' },\n  { symbol: 'PRCH', sector: 'Assurance tech', status: 'portfolio' },\n  { symbol: 'RGTI', sector: 'Informatique quantique', status: 'portfolio' },\n  { symbol: 'VUZI', sector: 'Smart glasses / AR', status: 'portfolio' },\n  { symbol: 'XYL', sector: \"Gestion de l'eau\", status: 'portfolio' }\n];\nconst watchlist = [\n  { symbol: 'SMR', sector: 'Nucléaire SMR', status: 'watchlist' },\n  { symbol: 'ALTD', sector: 'Drones FR', status: 'watchlist' },\n  { symbol: 'OKLO', sector: 'Nucléaire SMR', status: 'watchlist' },\n  { symbol: 'BLNK', sector: 'Recharge VE', status: 'watchlist' },\n  { symbol: 'GRO', sector: 'Santé mentale', status: 'watchlist' },\n  { symbol: 'STIM', sector: 'Neuromodulation', status: 'watchlist' },\n  { symbol: 'PLX', sector: 'Diagnostics moléculaires', status: 'watchlist' }\n];\nreturn [...portfolio, ...watchlist].map(t => ({ json: t }));"
+        "jsCode": "const portfolio = [\n  { symbol: 'BBAI', sector: 'IA défense', status: 'portfolio' },\n  { symbol: 'HIMS', sector: 'Téléhealth', status: 'portfolio' },\n  { symbol: 'HYLN', sector: 'Camions électriques', status: 'portfolio' },\n  { symbol: 'MMED', sector: 'Psychédéliques thérapeutiques', status: 'portfolio' },\n  { symbol: 'PRCH', sector: 'Assurance tech', status: 'portfolio' },\n  { symbol: 'RGTI', sector: 'Informatique quantique', status: 'portfolio' },\n  { symbol: 'VUZI', sector: 'Smart glasses / AR', status: 'portfolio' },\n  { symbol: 'XYL', sector: \"Gestion de l'eau\", status: 'portfolio' }\n];\nconst watchlist = [\n  { symbol: 'SMR', sector: 'Nucléaire SMR', status: 'watchlist' },\n  { symbol: 'ALTD', sector: 'Drones FR', status: 'watchlist' },\n  { symbol: 'OKLO', sector: 'Nucléaire SMR', status: 'watchlist' },\n  { symbol: 'BLNK', sector: 'Recharge VE', status: 'watchlist' },\n  { symbol: 'GRO', sector: 'Santé mentale', status: 'watchlist' },\n  { symbol: 'STIM', sector: 'Neuromodulation', status: 'watchlist' },\n  { symbol: 'PLX', sector: 'Diagnostics moléculaires', status: 'watchlist' }\n];\nreturn [...portfolio, ...watchlist].map(t => ({ json: t }));",
+        "mode": "runOnceForAllItems"
       },
       "id": "node-read-watchlist",
       "name": "Lire tickers",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        460,
-        300
-      ]
+      "position": [460, 300]
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nconst date = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });\n\nreturn items.map(item => {\n  const { symbol, sector, status } = item.json;\n\n  let prompt;\n  if (status === 'portfolio') {\n    prompt = `Tu es un analyste financier expert. Analyse l'action ${symbol} (${sector}) pour un investisseur qui la DÉTIENT DÉJÀ en portefeuille (aujourd'hui ${date}).\n\nÉTAPE 1 — OBLIGATOIRE : Utilise immédiatement web_search avec la requête \"${symbol} stock news 2026\" pour trouver les actualités récentes. Tu NE PEUX PAS répondre sans avoir d'abord effectué cette recherche web.\n\nÉTAPE 2 — Après avoir vu les résultats :\n- Si aucune information pertinente sur ${symbol} → réponds UNIQUEMENT : SKIP\n- Sinon → génère le briefing suivant.\n\nFocus : risques à surveiller, signaux de sortie, news impactant la position.\n\n## 💼 ${symbol} — ${sector} | Briefing du ${date}\n\n### 📰 Actualités récentes\n- [3 à 5 faits marquants datés issus de la recherche web]\n\n### ⚠️ Impact sur ta position\n- Risques identifiés : ...\n- Points positifs : ...\n\n### 🎯 Signal du jour\n**[CONSERVER / RENFORCER / ALLÉGER / VENDRE]** — Confiance : [Faible / Moyenne / Forte]\n\n### 📝 Verdict\n[2-3 phrases concrètes pour un investisseur qui détient déjà ce titre]`;\n  } else {\n    prompt = `Tu es un analyste financier expert. Analyse l'action ${symbol} (${sector}) pour un investisseur qui la SURVEILLE sans l'avoir encore achetée (aujourd'hui ${date}).\n\nÉTAPE 1 — OBLIGATOIRE : Utilise immédiatement web_search avec la requête \"${symbol} stock news 2026\" pour trouver les actualités récentes. Tu NE PEUX PAS répondre sans avoir d'abord effectué cette recherche web.\n\nÉTAPE 2 — Après avoir vu les résultats :\n- Si aucune information pertinente sur ${symbol} → réponds UNIQUEMENT : SKIP\n- Sinon → génère le briefing suivant.\n\nFocus : opportunité d'entrée, catalyseurs à venir, niveau de prix intéressant.\n\n## 👀 ${symbol} — ${sector} | Briefing du ${date}\n\n### 📰 Actualités récentes\n- [3 à 5 faits marquants datés issus de la recherche web]\n\n### 💡 Opportunité d'entrée\n- Niveau de prix intéressant : ...\n- Catalyseurs à venir : ...\n\n### 🎯 Signal du jour\n**[ACHETER MAINTENANT / ATTENDRE / IGNORER]** — Confiance : [Faible / Moyenne / Forte]\n\n### 📝 Verdict\n[2-3 phrases concrètes pour un investisseur qui envisage d'acheter ce titre]`;\n  }\n\n  const body = {\n    model: 'claude-sonnet-4-5',\n    max_tokens: 2048,\n    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],\n    messages: [{ role: 'user', content: prompt }]\n  };\n\n  return { json: { symbol, sector, status, body } };\n});",
+        "jsCode": "const items = $input.all();\nconst today = new Date().toISOString().slice(0, 10);\n\nreturn items.map(item => {\n  const { symbol, sector, status } = item.json;\n  const prompt = `Today is ${today}. Search the web for news about ${symbol} stock (${sector}) from TODAY ONLY.\\nReturn up to 3 significant news items from today (earnings, partnerships, FDA decisions, analyst upgrades/downgrades, regulatory news, major price catalysts).\\nIf no news from today exists, respond exactly: NO_NEWS_TODAY\\nFormat: concise bullet points only. No analysis.`;\n  const body = {\n    model: 'claude-haiku-4-5-20251001',\n    max_tokens: 512,\n    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],\n    messages: [{ role: 'user', content: prompt }]\n  };\n  return { json: { symbol, sector, status, body } };\n});",
         "mode": "runOnceForAllItems"
       },
-      "id": "node-build-request",
-      "name": "Préparer requête Claude",
+      "id": "node-prep-haiku",
+      "name": "Préparer requête Haiku",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        680,
-        300
-      ]
+      "position": [680, 300]
     },
     {
       "parameters": {
@@ -72,49 +65,160 @@
         "jsonBody": "={{ JSON.stringify($json.body) }}",
         "options": {}
       },
-      "id": "node-claude-api",
-      "name": "Claude API (Anthropic)",
+      "id": "node-haiku-api",
+      "name": "Claude Haiku API",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "continueOnFail": true,
-      "position": [
-        900,
-        300
-      ],
+      "position": [900, 300],
       "credentials": {
         "httpHeaderAuth": {
-          "id": "cred-anthropic",
-          "name": "Anthropic API Key"
+          "id": "5SwID15GVGrROnky",
+          "name": "Header Auth account"
         }
       }
     },
     {
       "parameters": {
-        "jsCode": "const responses = $input.all();\nconst prepItems = $('Préparer requête Claude').all();\n\nreturn responses.map((response, i) => {\n  const { symbol, sector, status } = prepItems[i].json;\n  const data = response.json;\n\n  let briefing = '';\n  if (data.content && Array.isArray(data.content)) {\n    for (const block of data.content) {\n      if (block.type === 'text') briefing += block.text;\n    }\n  }\n\n  const skip = !briefing || briefing.trim().toUpperCase() === 'SKIP';\n  return { json: { symbol, sector, status, briefing: briefing.trim(), skip } };\n});",
-        "mode": "runOnceForAllItems"
+        "jsCode": "const data = $json;\nconst prep = $('Préparer requête Haiku').item.json;\nconst symbol = prep.symbol;\nconst sector = prep.sector;\nconst status = prep.status;\n\nlet text = '';\nif (data.content && Array.isArray(data.content)) {\n  for (const block of data.content) {\n    if (block.type === 'text') text += block.text;\n  }\n}\nif (data.error) text = 'NO_NEWS_TODAY';\n\nreturn [{ json: { symbol, sector, status, rawNews: text.trim() || 'NO_NEWS_TODAY' } }];"
       },
-      "id": "node-extract-briefing",
-      "name": "Extraire briefing",
+      "id": "node-extract-news",
+      "name": "Extraire news brute",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1120,
-        300
-      ]
+      "position": [1120, 300]
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const all = $input.all();\nconst totalTickers = 15;\nconst active = all.filter(i => !i.json.skip);\nconst portfolio = active.filter(i => i.json.status === 'portfolio');\nconst watchlist = active.filter(i => i.json.status === 'watchlist');\nconst date = new Date().toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\n\nif (active.length === 0) {\n  return [{ json: {\n    htmlBody: '<html><body style=\"font-family:Arial,sans-serif;padding:24px\"><p>Aucune actualité récente aujourd\\'hui.</p></body></html>',\n    subject: `📈 Veille Boursière — ${new Date().toLocaleDateString('fr-FR')} — Aucune news`\n  }}];\n}\n\nconst activeSymbols = active.map(i => i.json.symbol).join(', ');\n\nfunction esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }\n\nfunction mdToHtml(md) {\n  return md\n    .replace(/^## (.+)$/gm, '<h2 style=\"color:#1a1a2e;font-size:18px;margin:20px 0 8px\">$1</h2>')\n    .replace(/^### (.+)$/gm, '<h3 style=\"color:#444;font-size:15px;margin:14px 0 6px\">$1</h3>')\n    .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')\n    .replace(/^- (.+)$/gm, '<li>$1</li>')\n    .replace(/(<li>.*<\\/li>\\n?)+/g, s => '<ul style=\"margin:4px 0 8px 20px\">' + s + '</ul>')\n    .replace(/\\n{2,}/g, '</p><p>')\n    .replace(/\\n/g, '<br>');\n}\n\nfunction renderSection(title, items) {\n  if (!items.length) return '';\n  let html = `<h2 style=\"color:#1a1a2e;font-size:20px;margin:32px 0 12px;padding-bottom:6px;border-bottom:3px solid #e94560\">${title} <span style=\"font-size:13px;color:#888;font-weight:normal\">(${items.length} action${items.length>1?'s':''})</span></h2>`;\n  for (const item of items) {\n    html += `<div style=\"margin:16px 0;padding:16px 20px;background:#f9f9f9;border-left:4px solid #e94560;border-radius:3px\">${mdToHtml(item.json.briefing)}</div>`;\n  }\n  return html;\n}\n\nconst body = `<html><body style=\"font-family:Arial,sans-serif;max-width:820px;margin:auto;padding:24px;color:#222\">\n<h1 style=\"color:#1a1a2e;font-size:24px;border-bottom:3px solid #e94560;padding-bottom:10px\">📈 Veille Boursière — ${date}</h1>\n<div style=\"background:#e8f4fd;border-left:4px solid #2196F3;padding:12px 16px;margin:16px 0;font-size:14px\">\n  📊 <strong>${active.length} action${active.length>1?'s':''} sur ${totalTickers} ont des actualités aujourd'hui :</strong> ${activeSymbols}\n</div>\n${renderSection('📊 MON PORTEFEUILLE', portfolio)}\n${renderSection('👀 MA WATCHLIST', watchlist)}\n<p style=\"color:#bbb;font-size:11px;margin-top:32px;border-top:1px solid #eee;padding-top:10px\">Généré par votre agent de veille boursière n8n + Claude</p>\n</body></html>`;\n\nreturn [{ json: {\n  htmlBody: body,\n  subject: `📈 Veille Boursière — ${new Date().toLocaleDateString('fr-FR')} — ${active.length}/${totalTickers} news`\n}}];"
+        "jsCode": "const news = {};\nfor (const item of $input.all()) {\n  news[item.json.symbol] = item.json.rawNews;\n}\nreturn [{ json: { news } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "node-aggregate-news",
+      "name": "Agréger toutes news",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:18795/filter",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ news: $json.news }) }}",
+        "options": {}
+      },
+      "id": "node-call-filter",
+      "name": "Appeler Warren Filtre",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $json;\nconst allNews = $('Agréger toutes news').first().json.news || {};\nconst newTickers = Array.isArray(data.new) ? data.new : Object.keys(allNews);\nconst skipTickers = Array.isArray(data.skip) ? data.skip : [];\nconst newCount = newTickers.length;\nreturn [{ json: { newTickers, skipTickers, newCount, allNews } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "node-extract-filter",
+      "name": "Extraire résultat filtre",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-new-tickers",
+              "leftValue": "={{ $json.newCount }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if-new",
+      "name": "Si nouveautés",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { newTickers, allNews } = $json;\nconst newNews = {};\nfor (const sym of (newTickers || [])) {\n  newNews[sym] = allNews[sym] || '';\n}\nreturn [{ json: { news: newNews } }];"
+      },
+      "id": "node-prep-synth",
+      "name": "Préparer synthèse Warren",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:18795/synthesize",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ news: $json.news }) }}",
+        "options": {}
+      },
+      "id": "node-call-synth",
+      "name": "Appeler Warren Synthèse",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nlet warrenText = '';\nif (typeof data.synthesis === 'string') {\n  warrenText = data.synthesis.trim();\n} else if (data.error) {\n  warrenText = \"Erreur de synthèse Warren : \" + data.error;\n}\nif (!warrenText) {\n  warrenText = \"Aucune actualité pertinente aujourd'hui.\";\n}\nreturn [{ json: { warrenText } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "node-extract-synth",
+      "name": "Extraire synthèse Warren",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const warrenText = $input.first().json.warrenText || \"Aucune actualité pertinente aujourd'hui.\";\nconst date = new Date().toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\n\nfunction mdToHtml(md) {\n  return md\n    .replace(/^#{1,3} (.+)$/gm, (m, t) => '<h3 style=\"color:#1a1a2e;font-size:18px;margin:20px 0 8px\">' + t + '</h3>')\n    .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')\n    .replace(/^> (.+)$/gm, '<blockquote style=\"border-left:3px solid #ccc;padding-left:10px;color:#555;margin:6px 0\">$1</blockquote>')\n    .replace(/^- (.+)$/gm, '<li>$1</li>')\n    .replace(/(<li>.*<\\/li>\\n?)+/g, s => '<ul style=\"margin:4px 0 8px 20px\">' + s + '</ul>')\n    .replace(/^---$/gm, '<hr style=\"border:none;border-top:1px solid #eee;margin:16px 0\">')\n    .replace(/\\n{2,}/g, '</p><p style=\"margin:8px 0\">')\n    .replace(/\\n/g, '<br>');\n}\n\nconst htmlBody = '<html><body style=\"font-family:Arial,sans-serif;max-width:820px;margin:auto;padding:24px;color:#222\">'\n  + '<h1 style=\"color:#1a1a2e;font-size:24px;border-bottom:3px solid #e94560;padding-bottom:10px\">📈 Veille Boursière — ' + date + '</h1>'\n  + '<div style=\"margin-top:20px\"><p style=\"margin:8px 0\">' + mdToHtml(warrenText) + '</p></div>'\n  + '<p style=\"color:#bbb;font-size:11px;margin-top:32px;border-top:1px solid #eee;padding-top:10px\">Synthèse Warren 🦉 via n8n + OpenClaw</p>'\n  + '</body></html>';\n\nreturn [{ json: {\n  htmlBody,\n  subject: '📈 Veille Boursière — ' + new Date().toLocaleDateString('fr-FR')\n}}];",
+        "mode": "runOnceForAllItems"
       },
       "id": "node-aggregate-email",
       "name": "Agréger pour Email",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1340,
-        160
-      ]
+      "position": [2880, 160]
     },
     {
       "parameters": {
@@ -128,10 +232,7 @@
       "name": "Envoyer Gmail",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [
-        1560,
-        160
-      ],
+      "position": [3100, 160],
       "credentials": {
         "smtp": {
           "id": "cred-gmail",
@@ -141,31 +242,25 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const all = $input.all();\nconst active = all.filter(i => !i.json.skip);\nreturn active.map(i => ({ json: { symbol: i.json.symbol, briefing: i.json.briefing } }));"
+        "jsCode": "const warrenText = $input.first().json.warrenText;\nconst text = (warrenText && warrenText.trim())\n  ? warrenText.trim()\n  : \"Aucune actualité pertinente aujourd'hui. Bonne journée.\";\nreturn [{ json: { text } }];",
+        "mode": "runOnceForAllItems"
       },
       "id": "node-aggregate-telegram",
       "name": "Agréger pour Telegram",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1340,
-        420
-      ]
+      "position": [2880, 440]
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nconst MAX = 4000;\nconst allChunks = [];\n\nfor (const item of items) {\n  const { symbol, briefing } = item.json;\n\n  if (briefing.length <= MAX) {\n    allChunks.push({ json: { chunk: briefing } });\n    continue;\n  }\n\n  const paragraphs = briefing.split(/\\n\\n+/);\n  const chunks = [];\n  let current = '';\n\n  for (const para of paragraphs) {\n    const candidate = current ? current + '\\n\\n' + para : para;\n    if (candidate.length > MAX) {\n      if (current) chunks.push(current);\n      current = para.length > MAX ? para.slice(0, MAX) : para;\n    } else {\n      current = candidate;\n    }\n  }\n  if (current) chunks.push(current);\n\n  chunks.forEach((chunk, i) => {\n    allChunks.push({ json: { chunk: chunks.length > 1 ? `_(${i+1}/${chunks.length})_\\n\\n${chunk}` : chunk } });\n  });\n}\n\nreturn allChunks;",
+        "jsCode": "const text = $input.first().json.text || \"Aucune actualité pertinente aujourd'hui.\";\nconst MAX = 4000;\n\nif (text.length <= MAX) {\n  return [{ json: { chunk: text } }];\n}\n\nconst paragraphs = text.split(/\\n\\n+/);\nconst chunks = [];\nlet current = '';\n\nfor (const para of paragraphs) {\n  const candidate = current ? current + '\\n\\n' + para : para;\n  if (candidate.length > MAX) {\n    if (current) chunks.push(current);\n    current = para.length > MAX ? para.slice(0, MAX) : para;\n  } else {\n    current = candidate;\n  }\n}\nif (current) chunks.push(current);\n\nreturn chunks.map((chunk, i) => ({\n  json: { chunk: chunks.length > 1 ? '_(' + (i+1) + '/' + chunks.length + ')_\\n\\n' + chunk : chunk }\n}));",
         "mode": "runOnceForAllItems"
       },
       "id": "node-split-telegram",
       "name": "Découper pour Telegram",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1560,
-        420
-      ]
+      "position": [3100, 440]
     },
     {
       "parameters": {
@@ -179,128 +274,70 @@
       "name": "Envoyer Telegram",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [
-        1780,
-        420
-      ],
+      "position": [3320, 440],
       "credentials": {
         "telegramApi": {
-          "id": "cred-telegram",
-          "name": "Telegram Bot API"
+          "id": "HBbPM9dctkeKAwG1",
+          "name": "Telegram account"
         }
       }
     }
   ],
   "connections": {
     "Schedule 8h Lun-Ven": {
-      "main": [
-        [
-          {
-            "node": "Lire tickers",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Lire tickers", "type": "main", "index": 0}]]
     },
     "Lire tickers": {
+      "main": [[{"node": "Préparer requête Haiku", "type": "main", "index": 0}]]
+    },
+    "Préparer requête Haiku": {
+      "main": [[{"node": "Claude Haiku API", "type": "main", "index": 0}]]
+    },
+    "Claude Haiku API": {
+      "main": [[{"node": "Extraire news brute", "type": "main", "index": 0}]]
+    },
+    "Extraire news brute": {
+      "main": [[{"node": "Agréger toutes news", "type": "main", "index": 0}]]
+    },
+    "Agréger toutes news": {
+      "main": [[{"node": "Appeler Warren Filtre", "type": "main", "index": 0}]]
+    },
+    "Appeler Warren Filtre": {
+      "main": [[{"node": "Extraire résultat filtre", "type": "main", "index": 0}]]
+    },
+    "Extraire résultat filtre": {
+      "main": [[{"node": "Si nouveautés", "type": "main", "index": 0}]]
+    },
+    "Si nouveautés": {
       "main": [
-        [
-          {
-            "node": "Préparer requête Claude",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{"node": "Préparer synthèse Warren", "type": "main", "index": 0}],
+        []
       ]
     },
-    "Préparer requête Claude": {
-      "main": [
-        [
-          {
-            "node": "Claude API (Anthropic)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Préparer synthèse Warren": {
+      "main": [[{"node": "Appeler Warren Synthèse", "type": "main", "index": 0}]]
     },
-    "Claude API (Anthropic)": {
-      "main": [
-        [
-          {
-            "node": "Extraire briefing",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Appeler Warren Synthèse": {
+      "main": [[{"node": "Extraire synthèse Warren", "type": "main", "index": 0}]]
     },
-    "Extraire briefing": {
-      "main": [
-        [
-          {
-            "node": "Agréger pour Email",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Agréger pour Telegram",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Extraire synthèse Warren": {
+      "main": [[
+        {"node": "Agréger pour Email", "type": "main", "index": 0},
+        {"node": "Agréger pour Telegram", "type": "main", "index": 0}
+      ]]
     },
     "Agréger pour Email": {
-      "main": [
-        [
-          {
-            "node": "Envoyer Gmail",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Envoyer Gmail", "type": "main", "index": 0}]]
     },
     "Agréger pour Telegram": {
-      "main": [
-        [
-          {
-            "node": "Découper pour Telegram",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Découper pour Telegram", "type": "main", "index": 0}]]
     },
     "Découper pour Telegram": {
-      "main": [
-        [
-          {
-            "node": "Envoyer Telegram",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Envoyer Telegram", "type": "main", "index": 0}]]
     }
   },
-  "id": "veille-boursiere-001",
-  "active": false,
   "settings": {
-    "executionOrder": "v1",
-    "timezone": "Europe/Paris"
+    "executionOrder": "v1"
   },
-  "versionId": "1",
-  "meta": {
-    "instanceId": "stock-tracker"
-  },
-  "tags": [
-    {
-      "name": "bourse",
-      "createdAt": "2026-04-30T00:00:00.000Z",
-      "updatedAt": "2026-04-30T00:00:00.000Z"
-    }
-  ]
+  "active": true
 }
