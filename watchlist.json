@@ -4,9 +4,10 @@
     { "symbol": "ALTD", "name": "Altitude", "sector": "Drones FR" },
     { "symbol": "OKLO", "name": "Oklo Inc.", "sector": "Nucléaire SMR" },
     { "symbol": "BLNK", "name": "Blink Charging", "sector": "Recharge VE" },
-    { "symbol": "GRO", "name": "Greenbrook TMS", "sector": "Santé mentale" },
+    { "symbol": "GRO", "name": "Brazil Potash Corp", "sector": "Engrais" },
     { "symbol": "STIM", "name": "Neuronetics", "sector": "Neuromodulation" },
-    { "symbol": "PLX", "name": "Progenity", "sector": "Diagnostics moléculaires" }
+    { "symbol": "PLX", "name": "Progenity", "sector": "Diagnostics moléculaires" },
+    { "symbol": "HYLN", "name": "Hyliion Holdings", "sector": "Camions électriques" }
   ],
   "updated_at": "2026-04-30"
 }

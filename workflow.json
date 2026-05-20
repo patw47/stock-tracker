@@ -1,6 +1,6 @@
 {
   "id": "veille-boursiere-001",
-  "name": "Veille Boursière Quotidienne",
+  "name": "Daily Stock Market Watch",
   "nodes": [
     {
       "parameters": {
@@ -8,16 +8,19 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 8 * * 1-5"
+              "expression": "0 12 * * 1-5"
             }
           ]
         }
       },
       "id": "node-schedule",
-      "name": "Schedule 8h Lun-Ven",
+      "name": "Schedule 12h Mon-Fri",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [240, 300]
+      "position": [
+        240,
+        300
+      ]
     },
     {
       "parameters": {
@@ -25,10 +28,13 @@
         "mode": "runOnceForAllItems"
       },
       "id": "node-read-watchlist",
-      "name": "Lire tickers",
+      "name": "Read Tickers",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [460, 300]
+      "position": [
+        460,
+        300
+      ]
     },
     {
       "parameters": {
@@ -36,10 +42,13 @@
         "mode": "runOnceForAllItems"
       },
       "id": "node-prep-haiku",
-      "name": "Préparer requête Haiku",
+      "name": "Prepare Haiku Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [680, 300]
+      "position": [
+        680,
+        300
+      ]
     },
     {
       "parameters": {
@@ -70,7 +79,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "continueOnFail": true,
-      "position": [900, 300],
+      "position": [
+        900,
+        300
+      ],
       "credentials": {
         "httpHeaderAuth": {
           "id": "5SwID15GVGrROnky",
@@ -80,13 +92,16 @@
     },
     {
       "parameters": {
-        "jsCode": "const data = $json;\nconst prep = $('Préparer requête Haiku').item.json;\nconst symbol = prep.symbol;\nconst sector = prep.sector;\nconst status = prep.status;\n\nlet text = '';\nif (data.content && Array.isArray(data.content)) {\n  for (const block of data.content) {\n    if (block.type === 'text') text += block.text;\n  }\n}\nif (data.error) text = 'NO_NEWS_TODAY';\n\nreturn [{ json: { symbol, sector, status, rawNews: text.trim() || 'NO_NEWS_TODAY' } }];"
+        "jsCode": "const data = $json;\nconst prep = $('Prepare Haiku Request').item.json;\nconst symbol = prep.symbol;\nconst sector = prep.sector;\nconst status = prep.status;\n\nlet text = '';\nif (data.content && Array.isArray(data.content)) {\n  for (const block of data.content) {\n    if (block.type === 'text') text += block.text;\n  }\n}\nif (data.error) text = 'NO_NEWS_TODAY';\n\nreturn [{ json: { symbol, sector, status, rawNews: text.trim() || 'NO_NEWS_TODAY' } }];"
       },
       "id": "node-extract-news",
-      "name": "Extraire news brute",
+      "name": "Extract Raw News",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 300]
+      "position": [
+        1120,
+        300
+      ]
     },
     {
       "parameters": {
@@ -94,10 +109,13 @@
         "mode": "runOnceForAllItems"
       },
       "id": "node-aggregate-news",
-      "name": "Agréger toutes news",
+      "name": "Aggregate All News",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1340, 300]
+      "position": [
+        1340,
+        300
+      ]
     },
     {
       "parameters": {
@@ -118,22 +136,28 @@
         "options": {}
       },
       "id": "node-call-filter",
-      "name": "Appeler Warren Filtre",
+      "name": "Call Warren Filter",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "continueOnFail": true,
-      "position": [1560, 300]
+      "position": [
+        1560,
+        300
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const data = $json;\nconst allNews = $('Agréger toutes news').first().json.news || {};\nconst newTickers = Array.isArray(data.new) ? data.new : Object.keys(allNews);\nconst skipTickers = Array.isArray(data.skip) ? data.skip : [];\nconst newCount = newTickers.length;\nreturn [{ json: { newTickers, skipTickers, newCount, allNews } }];",
+        "jsCode": "const data = $json;\nconst allNews = $('Aggregate All News').first().json.news || {};\nconst newTickers = Array.isArray(data.new) ? data.new : Object.keys(allNews);\nconst skipTickers = Array.isArray(data.skip) ? data.skip : [];\nconst newCount = newTickers.length;\nreturn [{ json: { newTickers, skipTickers, newCount, allNews } }];",
         "mode": "runOnceForAllItems"
       },
       "id": "node-extract-filter",
-      "name": "Extraire résultat filtre",
+      "name": "Extract Filter Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1780, 300]
+      "position": [
+        1780,
+        300
+      ]
     },
     {
       "parameters": {
@@ -159,20 +183,26 @@
         "options": {}
       },
       "id": "node-if-new",
-      "name": "Si nouveautés",
+      "name": "If New Items",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [2000, 300]
+      "position": [
+        2000,
+        300
+      ]
     },
     {
       "parameters": {
         "jsCode": "const { newTickers, allNews } = $json;\nconst newNews = {};\nfor (const sym of (newTickers || [])) {\n  newNews[sym] = allNews[sym] || '';\n}\nreturn [{ json: { news: newNews } }];"
       },
       "id": "node-prep-synth",
-      "name": "Préparer synthèse Warren",
+      "name": "Prepare Warren Synthesis",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2220, 300]
+      "position": [
+        2220,
+        300
+      ]
     },
     {
       "parameters": {
@@ -193,10 +223,13 @@
         "options": {}
       },
       "id": "node-call-synth",
-      "name": "Appeler Warren Synthèse",
+      "name": "Call Warren Synthesis",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2440, 300]
+      "position": [
+        2440,
+        300
+      ]
     },
     {
       "parameters": {
@@ -204,10 +237,13 @@
         "mode": "runOnceForAllItems"
       },
       "id": "node-extract-synth",
-      "name": "Extraire synthèse Warren",
+      "name": "Extract Warren Synthesis",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2660, 300]
+      "position": [
+        2660,
+        300
+      ]
     },
     {
       "parameters": {
@@ -215,10 +251,13 @@
         "mode": "runOnceForAllItems"
       },
       "id": "node-aggregate-email",
-      "name": "Agréger pour Email",
+      "name": "Aggregate for Email",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2880, 160]
+      "position": [
+        2880,
+        160
+      ]
     },
     {
       "parameters": {
@@ -229,10 +268,13 @@
         "options": {}
       },
       "id": "node-gmail",
-      "name": "Envoyer Gmail",
+      "name": "Send Gmail",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [3100, 160],
+      "position": [
+        3100,
+        160
+      ],
       "credentials": {
         "smtp": {
           "id": "cred-gmail",
@@ -246,10 +288,13 @@
         "mode": "runOnceForAllItems"
       },
       "id": "node-aggregate-telegram",
-      "name": "Agréger pour Telegram",
+      "name": "Aggregate for Telegram",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2880, 440]
+      "position": [
+        2880,
+        440
+      ]
     },
     {
       "parameters": {
@@ -257,10 +302,13 @@
         "mode": "runOnceForAllItems"
       },
       "id": "node-split-telegram",
-      "name": "Découper pour Telegram",
+      "name": "Split for Telegram",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3100, 440]
+      "position": [
+        3100,
+        440
+      ]
     },
     {
       "parameters": {
@@ -271,10 +319,13 @@
         }
       },
       "id": "node-telegram",
-      "name": "Envoyer Telegram",
+      "name": "Send Telegram",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [3320, 440],
+      "position": [
+        3320,
+        440
+      ],
       "credentials": {
         "telegramApi": {
           "id": "HBbPM9dctkeKAwG1",
@@ -284,56 +335,176 @@
     }
   ],
   "connections": {
-    "Schedule 8h Lun-Ven": {
-      "main": [[{"node": "Lire tickers", "type": "main", "index": 0}]]
+    "Read Tickers": {
+      "main": [
+        [
+          {
+            "node": "Prepare Haiku Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Lire tickers": {
-      "main": [[{"node": "Préparer requête Haiku", "type": "main", "index": 0}]]
-    },
-    "Préparer requête Haiku": {
-      "main": [[{"node": "Claude Haiku API", "type": "main", "index": 0}]]
+    "Prepare Haiku Request": {
+      "main": [
+        [
+          {
+            "node": "Claude Haiku API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Claude Haiku API": {
-      "main": [[{"node": "Extraire news brute", "type": "main", "index": 0}]]
-    },
-    "Extraire news brute": {
-      "main": [[{"node": "Agréger toutes news", "type": "main", "index": 0}]]
-    },
-    "Agréger toutes news": {
-      "main": [[{"node": "Appeler Warren Filtre", "type": "main", "index": 0}]]
-    },
-    "Appeler Warren Filtre": {
-      "main": [[{"node": "Extraire résultat filtre", "type": "main", "index": 0}]]
-    },
-    "Extraire résultat filtre": {
-      "main": [[{"node": "Si nouveautés", "type": "main", "index": 0}]]
-    },
-    "Si nouveautés": {
       "main": [
-        [{"node": "Préparer synthèse Warren", "type": "main", "index": 0}],
+        [
+          {
+            "node": "Extract Raw News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Raw News": {
+      "main": [
+        [
+          {
+            "node": "Aggregate All News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate All News": {
+      "main": [
+        [
+          {
+            "node": "Call Warren Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Warren Filter": {
+      "main": [
+        [
+          {
+            "node": "Extract Filter Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Filter Result": {
+      "main": [
+        [
+          {
+            "node": "If New Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If New Items": {
+      "main": [
+        [
+          {
+            "node": "Prepare Warren Synthesis",
+            "type": "main",
+            "index": 0
+          }
+        ],
         []
       ]
     },
-    "Préparer synthèse Warren": {
-      "main": [[{"node": "Appeler Warren Synthèse", "type": "main", "index": 0}]]
+    "Prepare Warren Synthesis": {
+      "main": [
+        [
+          {
+            "node": "Call Warren Synthesis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Appeler Warren Synthèse": {
-      "main": [[{"node": "Extraire synthèse Warren", "type": "main", "index": 0}]]
+    "Call Warren Synthesis": {
+      "main": [
+        [
+          {
+            "node": "Extract Warren Synthesis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Extraire synthèse Warren": {
-      "main": [[
-        {"node": "Agréger pour Email", "type": "main", "index": 0},
-        {"node": "Agréger pour Telegram", "type": "main", "index": 0}
-      ]]
+    "Extract Warren Synthesis": {
+      "main": [
+        [
+          {
+            "node": "Aggregate for Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Aggregate for Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Agréger pour Email": {
-      "main": [[{"node": "Envoyer Gmail", "type": "main", "index": 0}]]
+    "Aggregate for Email": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Agréger pour Telegram": {
-      "main": [[{"node": "Découper pour Telegram", "type": "main", "index": 0}]]
+    "Aggregate for Telegram": {
+      "main": [
+        [
+          {
+            "node": "Split for Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Découper pour Telegram": {
-      "main": [[{"node": "Envoyer Telegram", "type": "main", "index": 0}]]
+    "Split for Telegram": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule 12h Mon-Fri": {
+      "main": [
+        [
+          {
+            "node": "Read Tickers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {

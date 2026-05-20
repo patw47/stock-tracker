@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Warren HTTP bridge for n8n.
-POST /filter     — ticker-watch: classify tickers as NEW vs SKIP
-POST /synthesize — executive-synthesis: markdown briefing + write memory
+POST /filter     -- ticker-watch: classify tickers as NEW vs SKIP
+POST /synthesize -- executive-synthesis: markdown briefing + write memory
 """
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import subprocess, json, os, time, datetime
@@ -14,6 +14,7 @@ MAX_MEMORY = 3
 
 
 def read_memory(symbol):
+    """Return last memory entries for symbol, empty string if none."""
     path = os.path.join(MEMORY_DIR, f"{symbol}.md")
     try:
         with open(path) as f:
@@ -23,6 +24,7 @@ def read_memory(symbol):
 
 
 def write_memory(symbol, raw_news, date):
+    """Prepend raw_news entry for symbol; keep last MAX_MEMORY entries."""
     os.makedirs(MEMORY_DIR, exist_ok=True)
     path = os.path.join(MEMORY_DIR, f"{symbol}.md")
     existing = read_memory(symbol)
@@ -34,6 +36,7 @@ def write_memory(symbol, raw_news, date):
 
 
 def call_warren(message, tag):
+    """Invoke warren agent via OpenClaw CLI; return raw stdout string."""
     session_id = f"n8n-{tag}-{int(time.time())}"
     env = os.environ.copy()
     env["OPENCLAW_CONFIG_PATH"] = OPENCLAW_CONFIG
@@ -48,22 +51,19 @@ def call_warren(message, tag):
 
 def extract_inner(stdout):
     """Extract response text from OpenClaw JSON envelope.
-    OpenClaw --json format: {"result": {"payloads": [{"text": "..."}], "finalAssistantVisibleText": "..."}}
+    OpenClaw --json: {"result": {"payloads": [...], "finalAssistantVisibleText": "..."}}
     """
     try:
         outer = json.loads(stdout)
         result_obj = outer.get("result", {})
-        # Primary: result.finalAssistantVisibleText (complete response)
         fat = result_obj.get("finalAssistantVisibleText")
         if fat:
             return fat
-        # Fallback: result.payloads (may be truncated intermediate chunks)
         payloads = result_obj.get("payloads", [])
         if payloads and isinstance(payloads, list):
             all_text = "\n".join(p.get("text", "") for p in payloads if p.get("text"))
             if all_text:
                 return all_text
-        # Top-level fallback for other formats
         for key in ("response", "content", "message", "text", "output"):
             if key in outer and isinstance(outer[key], str):
                 return outer[key]
@@ -74,12 +74,10 @@ def extract_inner(stdout):
 
 def _clean_synthesis(text):
     """Strip reasoning preamble and markdown code fences from Warren synthesis."""
-    # Try to extract content from ```markdown ... ``` or ``` ... ``` fences
     import re
     m = re.search(r'```(?:markdown)?\n(.*?)```', text, re.DOTALL)
     if m:
         return m.group(1).strip()
-    # Find start of the actual briefing: first # heading
     idx = text.find("# 📈")
     if idx < 0:
         idx = text.find("# ")
@@ -90,6 +88,7 @@ def _clean_synthesis(text):
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
+        """Route POST /filter and /synthesize to their handlers."""
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length).decode("utf-8")
         try:
@@ -114,44 +113,80 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def handle_filter(self, body):
-        """Call Warren ticker-watch — returns {new:[...], skip:[...]}."""
+        """Classify tickers as NEW vs SKIP.
+
+        Python-level rules (no Warren call needed for first two):
+          - NO_NEWS_TODAY              -> SKIP
+          - has news + empty memory   -> NEW  (bootstrap: any news counts)
+          - has news + non-empty memory -> ask Warren for semantic dedup
+        """
         news = body.get("news", {})
         today = datetime.date.today().isoformat()
 
-        lines = [
-            "[TICKER-WATCH SKILL]",
-            f"DATE: {today}",
-            "",
-            "Classify each ticker as NEW or SKIP based on the rules in your ticker-watch skill.",
-            "",
-        ]
+        auto_new = {}     # empty memory + has news
+        auto_skip = {}    # NO_NEWS_TODAY or empty text
+        check_dedup = {}  # non-empty memory + has news -> Warren
+
         for sym, text in news.items():
+            text_clean = text.strip() if text else ""
             mem = read_memory(sym)
-            lines += [
-                f"=== {sym} ===",
-                "RAW NEWS (from Haiku web_search):",
-                text.strip() if text.strip() else "(no news retrieved)",
+            if not text_clean or text_clean == "NO_NEWS_TODAY":
+                auto_skip[sym] = "No news found"
+            elif not mem:
+                auto_new[sym] = "First entry - latest news captured (no prior memory)"
+            else:
+                check_dedup[sym] = (text_clean, mem)
+
+        result = {
+            "new": list(auto_new.keys()),
+            "skip": list(auto_skip.keys()),
+            "reasons": {**auto_new, **auto_skip},
+        }
+
+        if check_dedup:
+            lines = [
+                "[TICKER-WATCH SKILL]",
+                f"DATE: {today}",
                 "",
-                "MEMORY (last 3 entries):",
-                mem if mem else "(no previous entries)",
+                "Classify each ticker as NEW or SKIP.",
+                "SKIP only if the news is semantically identical to an existing memory entry.",
+                "If the news contains any genuinely new information not in memory, classify as NEW.",
                 "",
             ]
+            for sym, (text_clean, mem) in check_dedup.items():
+                lines += [
+                    f"=== {sym} ===",
+                    "RAW NEWS (from Haiku web_search):",
+                    text_clean,
+                    "",
+                    "MEMORY (last 3 entries):",
+                    mem,
+                    "",
+                ]
+            try:
+                stdout = call_warren("\n".join(lines), "filter")
+                inner = extract_inner(stdout)
+                start = inner.find("{")
+                end = inner.rfind("}") + 1
+                if start >= 0 and end > start:
+                    warren_result = json.loads(inner[start:end])
+                else:
+                    warren_result = {"new": list(check_dedup.keys()), "skip": [], "reasons": {}}
+            except Exception as e:
+                warren_result = {
+                    "new": list(check_dedup.keys()),
+                    "skip": [],
+                    "reasons": {sym: str(e) for sym in check_dedup},
+                }
 
-        try:
-            stdout = call_warren("\n".join(lines), "filter")
-            inner = extract_inner(stdout)
-            start = inner.find("{")
-            end = inner.rfind("}") + 1
-            if start >= 0 and end > start:
-                result = json.loads(inner[start:end])
-            else:
-                result = {"new": list(news.keys()), "skip": [], "reasons": {}}
-        except Exception as e:
-            result = {"error": str(e), "new": list(news.keys()), "skip": []}
+            result["new"].extend(warren_result.get("new", []))
+            result["skip"].extend(warren_result.get("skip", []))
+            result["reasons"].update(warren_result.get("reasons", {}))
+
         return json.dumps(result)
 
     def handle_synthesize(self, body):
-        """Call Warren executive-synthesis — returns {synthesis:"..."} and writes memory."""
+        """Call Warren executive-synthesis -- returns {synthesis:"..."} and writes memory."""
         news = body.get("news", {})
         today = datetime.date.today().isoformat()
 
@@ -168,7 +203,6 @@ class Handler(BaseHTTPRequestHandler):
         try:
             stdout = call_warren("\n".join(lines), "synth")
             raw = extract_inner(stdout)
-            # Strip reasoning preamble and markdown code fences
             synthesis = _clean_synthesis(raw)
             for sym, text in news.items():
                 if text.strip():
@@ -178,6 +212,7 @@ class Handler(BaseHTTPRequestHandler):
         return json.dumps({"synthesis": synthesis})
 
     def log_message(self, *_):
+        """Silence default HTTPServer request logging."""
         pass
 
 

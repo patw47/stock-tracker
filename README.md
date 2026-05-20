@@ -8,7 +8,7 @@ Every weekday morning it searches for fresh news on each ticker, filters out dup
 ## How it works
 
 ```
-Schedule (08:00 Paris, Mon–Fri)
+Schedule (12:00 Paris, Mon–Fri)
          │
          ▼
   Read 15 tickers (8 portfolio + 7 watchlist)
@@ -411,10 +411,10 @@ curl -s http://localhost:5680/healthz
 
 ## Customizing tickers
 
-Tickers are hardcoded in the **Lire tickers** node of the workflow. Edit them in the n8n UI:
+Tickers are hardcoded in the **Read Tickers** node of the workflow. Edit them in the n8n UI:
 
 1. Open the workflow
-2. Click **Lire tickers**
+2. Click **Read Tickers**
 3. Edit the `portfolio` and `watchlist` arrays in the JS code
 4. Save
 

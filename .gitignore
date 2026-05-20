@@ -2,7 +2,7 @@
 .env
 
 # n8n data (database, encryption key, logs)
-.n8n-data/
+n8n-data/
 n8n.log
 n8n.pid
 
