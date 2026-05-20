@@ -8,13 +8,13 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 12 * * 1-5"
+              "expression": "0 16 * * 1-5"
             }
           ]
         }
       },
       "id": "node-schedule",
-      "name": "Schedule 12h Mon-Fri",
+      "name": "Schedule 16h Mon-Fri",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -442,7 +442,7 @@
         ]
       ]
     },
-    "Schedule 12h Mon-Fri": {
+    "Schedule 16h Mon-Fri": {
       "main": [
         [
           {
