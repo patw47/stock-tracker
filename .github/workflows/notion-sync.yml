@@ -1,0 +1,26 @@
+name: Notion sync on merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  sync-on-merge:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Mark ticket Done and notify
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DB_TICKETS_ID: ${{ secrets.NOTION_DB_TICKETS_ID }}
+          NOTION_DB_SPECS_ID: ${{ secrets.NOTION_DB_SPECS_ID }}
+          TELEGRAM_ORCHESTRATION_BOT_TOKEN: ${{ secrets.TELEGRAM_ORCHESTRATION_BOT_TOKEN }}
+          TELEGRAM_ORCHESTRATION_CHAT_ID: ${{ secrets.TELEGRAM_ORCHESTRATION_CHAT_ID }}
+          PROJECT_NAME: ${{ secrets.PROJECT_NAME }}
+        run: |
+          pip install "git+https://${{ secrets.GH_PAT }}@github.com/patw47/orchestration.git" --quiet
+          python -m orchestration.qa_sync merged \
+            --branch "${{ github.event.pull_request.head.ref }}" \
+            --pr-url "${{ github.event.pull_request.html_url }}"
