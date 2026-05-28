@@ -34,4 +34,5 @@ jobs:
         env:
           TELEGRAM_ORCHESTRATION_BOT_TOKEN: ${{ secrets.TELEGRAM_ORCHESTRATION_BOT_TOKEN }}
           TELEGRAM_ORCHESTRATION_CHAT_ID: ${{ secrets.TELEGRAM_ORCHESTRATION_CHAT_ID }}
+          PROJECT_NAME: ${{ secrets.PROJECT_NAME }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
