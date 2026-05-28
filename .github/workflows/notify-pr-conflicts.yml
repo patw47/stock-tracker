@@ -1,0 +1,37 @@
+name: Notify PR merge conflicts
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  pr-conflict-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout orchestration
+        uses: actions/checkout@v4
+        with:
+          repository: patw47/orchestration
+          token: ${{ secrets.GH_PAT }}
+          path: orchestration
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: orchestration/pyproject.toml
+
+      - name: Install orchestration
+        run: pip install -e orchestration/ --quiet
+
+      - name: Wait for GitHub mergeability computation
+        run: sleep 60
+
+      - name: Notify conflicting PRs
+        run: python -m orchestration.notifier --check-pr-conflicts --repo ${{ github.repository }}
+        env:
+          TELEGRAM_ORCHESTRATION_BOT_TOKEN: ${{ secrets.TELEGRAM_ORCHESTRATION_BOT_TOKEN }}
+          TELEGRAM_ORCHESTRATION_CHAT_ID: ${{ secrets.TELEGRAM_ORCHESTRATION_CHAT_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
