@@ -1,3 +1,6 @@
+# Orchestration metadata (never commit — causes merge conflicts across worktrees)
+.ticket-id
+
 # Secrets
 .env
 
