@@ -90,6 +90,30 @@ fi
 
 log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) import_rc=$import_rc trigger=$trigger"
 
+# 7. Renvoi du dernier briefing Warren stocké -> bot Telegram stock-tracker, pour vérifier
+#    le format / l'inclusion macro à chaque deploy. Best-effort : n'influence pas overall.
+log "envoi dernier briefing stocké -> Telegram stock-tracker"
+brief=$(curl -s -m 30 -X POST "http://127.0.0.1:$WARREN_PORT/preview" \
+  -H 'content-type: application/json' -d '{}' \
+  | python3 -c "import sys,json;print((json.load(sys.stdin).get('synthesis') or '').strip())" 2>/dev/null)
+tg_token=$(sudo sed -n 's/^TELEGRAM_TOKEN=//p' "$REPO/.env" | head -1 | tr -d '\r')
+tg_chat=$(sudo sed -n 's/^TELEGRAM_CHAT_ID=//p' "$REPO/.env" | head -1 | tr -d '\r')
+if [ -n "$tg_token" ] && [ -n "$tg_chat" ]; then
+  if [ -n "$brief" ]; then
+    body="📋 Dernier briefing Warren (vérif format/macro — deploy)
+
+$brief"
+  else
+    body="📋 Aucun briefing Warren stocké pour l'instant (sera dispo après la prochaine journée avec news)."
+  fi
+  curl -s -m 20 -X POST "https://api.telegram.org/bot${tg_token}/sendMessage" \
+    --data-urlencode "chat_id=${tg_chat}" \
+    --data-urlencode "text=${body:0:4000}" >/dev/null \
+    && log "briefing renvoyé sur Telegram" || log "WARN envoi briefing Telegram échec"
+else
+  log "WARN TELEGRAM_TOKEN/CHAT_ID absents de .env — pas d'envoi briefing"
+fi
+
 # Lignes machine-lisibles consommées par deploy.yml.
 echo "STATUS_STOCK_TRACKER=$st_active"
 echo "STATUS_N8N_HEALTH=$n8n_health"

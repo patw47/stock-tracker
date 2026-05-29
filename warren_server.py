@@ -3,6 +3,7 @@
 Warren HTTP bridge for n8n.
 POST /filter     -- ticker-watch: classify tickers as NEW vs SKIP
 POST /synthesize -- executive-synthesis: markdown briefing + write memory
+POST /preview    -- return the last stored briefing (no Warren call); deploy format check
 """
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import subprocess, json, os, time, datetime
@@ -27,6 +28,7 @@ except ImportError:
 OPENCLAW_CONFIG = "/home/warren/.openclaw/openclaw.json"
 WORKSPACE = "/home/warren/.openclaw/workspace-warren"
 MEMORY_DIR = os.path.join(WORKSPACE, "memory", "tickers")
+LAST_BRIEFING = os.path.join(WORKSPACE, "memory", "last_briefing.md")
 MAX_MEMORY = 3
 
 
@@ -112,6 +114,39 @@ def _clean_synthesis(text):
     return text.strip()
 
 
+def _synthesize_news(news):
+    """Run Warren executive-synthesis for a {symbol: news_text} dict. No memory write."""
+    today = datetime.date.today().isoformat()
+    lines = [
+        "[EXECUTIVE-SYNTHESIS SKILL]",
+        f"DATE: {today}",
+        "",
+        "Synthesize the following new market information into today's executive briefing.",
+        "",
+    ]
+    for sym, text in news.items():
+        lines += [f"=== {sym} ===", (text or "").strip(), ""]
+    prompt = build_warren_prompt("\n".join(lines))
+    return _clean_synthesis(extract_inner(call_warren(prompt, "synth")))
+
+
+def store_last_briefing(synthesis):
+    """Persist the latest real briefing so the deploy can re-send it for format checks."""
+    os.makedirs(os.path.dirname(LAST_BRIEFING), exist_ok=True)
+    stamp = datetime.datetime.now().isoformat(timespec="seconds")
+    with open(LAST_BRIEFING, "w") as f:
+        f.write(f"<!-- generated: {stamp} -->\n{synthesis.strip()}\n")
+
+
+def read_last_briefing():
+    """Return the stored last briefing (with its generation timestamp), or empty string."""
+    try:
+        with open(LAST_BRIEFING) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         """Route POST /filter and /synthesize to their handlers."""
@@ -126,6 +161,8 @@ class Handler(BaseHTTPRequestHandler):
             resp = self.handle_filter(body)
         elif self.path == "/synthesize":
             resp = self.handle_synthesize(body)
+        elif self.path == "/preview":
+            resp = self.handle_preview(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -217,29 +254,24 @@ class Handler(BaseHTTPRequestHandler):
         """Call Warren executive-synthesis -- returns {synthesis:"..."} and writes memory."""
         news = body.get("news", {})
         today = datetime.date.today().isoformat()
-
-        lines = [
-            "[EXECUTIVE-SYNTHESIS SKILL]",
-            f"DATE: {today}",
-            "",
-            "Synthesize the following new market information into today's executive briefing.",
-            "",
-        ]
-        for sym, text in news.items():
-            lines += [f"=== {sym} ===", text.strip(), ""]
-
         try:
-            query = "\n".join(lines)
-            prompt = build_warren_prompt(query)
-            stdout = call_warren(prompt, "synth")
-            raw = extract_inner(stdout)
-            synthesis = _clean_synthesis(raw)
+            synthesis = _synthesize_news(news)
             for sym, text in news.items():
-                if text.strip():
+                if text and text.strip():
                     write_memory(sym, text, today)
+            if synthesis and not synthesis.startswith("Synthesis error"):
+                store_last_briefing(synthesis)
         except Exception as e:
             synthesis = f"Synthesis error: {e}"
         return json.dumps({"synthesis": synthesis})
+
+    def handle_preview(self, _body):
+        """Return the last real briefing that was stored (no Warren call, no write).
+
+        Lets the deploy re-send the most recent briefing so the format / macro inclusion
+        can be eyeballed. Empty if no briefing has been generated yet.
+        """
+        return json.dumps({"synthesis": read_last_briefing()})
 
     def log_message(self, *_):
         """Silence default HTTPServer request logging."""
