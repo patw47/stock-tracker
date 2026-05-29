@@ -409,6 +409,70 @@ curl -s http://localhost:5680/healthz
 
 ---
 
+## Continuous deployment (GitHub Actions → VPS)
+
+Pushing to `main` auto-deploys to the VPS once CI is green.
+
+```
+push main → CI green ──► .github/workflows/deploy.yml
+                              │
+                              ├─ gate: "Notify PR merge conflicts" green on same commit
+                              ├─ SSH queenp@VPS
+                              │     git fetch + reset --hard origin/main
+                              │     deploy/remote.sh:
+                              │        stop stock-tracker  (release sqlite lock)
+                              │        import_workflow.py  (upsert workflow into sqlite)
+                              │        restart openclaw-warren → warren-server → stock-tracker
+                              │        healthcheck: services + n8n :5680/healthz + bridge :18795
+                              └─ Telegram status message (success / failure + per-service state)
+```
+
+### Roles
+
+- **`queenp`** — infra user. SSH target. Owns `database.sqlite`, has passwordless `sudo`.
+  Runs git, the sqlite import, and `systemctl restart`.
+- **`warren`** — OpenClaw agent user only, limited access. Not used by the deploy.
+
+### Why a custom workflow importer
+
+`n8n import:workflow` fails on this VPS — the n8n CLI run as `warren` hits `EACCES` on
+`/opt/apps/stock-tracker/n8n-data/.n8n/config` (mode `600`, owned by `warren`). So
+`deploy/import_workflow.py` (run as `queenp`, owner of `database.sqlite`) writes
+`workflow.json` directly into the n8n database:
+
+- upserts the workflow from `workflow.json` (`veille-boursiere-001`) with `active=1`
+- deactivates every other workflow → enforces a **single active workflow** and removes
+  the legacy `48dff814-…` ("Veille Boursière Quotidienne")
+- introspects the schema (`PRAGMA table_info`) so it survives n8n version changes
+
+n8n is stopped during the import to avoid sqlite lock contention, then all three
+services are restarted.
+
+### Required GitHub secrets
+
+| Secret | Purpose |
+|---|---|
+| `VPS_SSH_HOST` | VPS IP/host (e.g. `77.42.72.164`) |
+| `VPS_SSH_USER` | SSH user (`queenp`) |
+| `VPS_SSH_KEY` | Private SSH key (full `-----BEGIN…END-----` block) |
+| `TELEGRAM_ORCHESTRATION_BOT_TOKEN` | Bot token for the status message |
+| `TELEGRAM_ORCHESTRATION_CHAT_ID` | Target chat for the status message |
+| `PROJECT_NAME` | Project label shown in the status message |
+
+### Manual run
+
+The deploy auto-triggers after CI, but you can also re-run it from the **Actions** tab
+(select the latest *Deploy to VPS* run → *Re-run jobs*), or run the steps by hand on the
+VPS:
+
+```bash
+ssh queenp@<vps-ip>
+git -C /opt/apps/stock-tracker pull
+bash /opt/apps/stock-tracker/deploy/remote.sh
+```
+
+---
+
 ## Customizing tickers
 
 Tickers are hardcoded in the **Read Tickers** node of the workflow. Edit them in the n8n UI:
