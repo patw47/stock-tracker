@@ -18,6 +18,15 @@ log() { echo "[deploy] $*"; }
 # id du workflow canonique, lu depuis workflow.json (évite toute dérive).
 WID=$(python3 -c "import json;print(json.load(open('$REPO/workflow.json'))['id'])")
 
+# 0. Dépendances Python du bridge Warren (warren_server.py utilise pydantic + requests).
+#    Installées dans le python système (/usr/bin/python3, celui du service warren-server).
+if [ -f "$REPO/requirements.txt" ]; then
+  log "install deps python (requirements.txt)"
+  sudo python3 -m pip install -r "$REPO/requirements.txt" --break-system-packages -q \
+    || sudo python3 -m pip install -r "$REPO/requirements.txt" -q \
+    || log "WARN pip install a échoué — warren-server peut ne pas démarrer"
+fi
+
 # 1. Stop n8n avant l'import (évite tout verrou sqlite concurrent).
 log "stop stock-tracker"
 sudo systemctl stop stock-tracker
@@ -62,10 +71,14 @@ fi
 #    bout-en-bout et recevoir le briefing Telegram (si news). Lancé en tant que warren,
 #    seul à pouvoir lire .n8n/config et donc déchiffrer les credentials.
 #    NB: pipeline SKIP -> pas de briefing si aucune news du jour (comportement normal).
+#    N8N_RUNNERS_ENABLED=false : le service n8n tourne déjà et occupe le task broker
+#    (port 5679) ; on désactive les task runners pour ce process one-shot (exécution
+#    en process principal) afin d'éviter "Task Broker's port 5679 is already in use".
 log "execute workflow $WID (run manuel de validation)"
 sudo -u warren env \
   N8N_USER_FOLDER="$N8N_DATA" \
   N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false \
+  N8N_RUNNERS_ENABLED=false \
   n8n execute --id="$WID"
 trigger_rc=$?
 if [ "$trigger_rc" -eq 0 ]; then trigger="ok"; else trigger="fail"; fi
