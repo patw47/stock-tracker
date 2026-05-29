@@ -79,11 +79,15 @@ jobs:
           # trim espaces/CR éventuels (copier-coller Windows -> "hostname contains invalid characters").
           host=$(printf '%s' "$VPS_SSH_HOST" | tr -d '[:space:]')
           user=$(printf '%s' "$VPS_SSH_USER" | tr -d '[:space:]')
+          # Blackhole MTU sur le chemin VPS->runner : le handshake ssh stalle (paquet retour
+          # droppé) puis sshd coupe à LoginGraceTime (~120s). On baisse le MTU du runner ->
+          # MSS plus petit -> le serveur segmente plus petit -> plus de drop.
+          iface=$(ip route show default | awk '{print $5; exit}')
+          echo "[deploy.yml] baisse MTU de $iface à 1360"
+          sudo ip link set dev "$iface" mtu 1360 || true
           # set +e local : on veut capturer le code retour ssh sans que bash -e tue le step.
           set +e
-          # KexAlgorithms classique : le KEX post-quantique (sntrup761) envoie un gros
-          # paquet qui se fait blackholer (MTU) entre le runner GitHub et le VPS -> hang.
-          out=$(ssh -i ~/.ssh/id_vps \
+          out=$(ssh -vvv -i ~/.ssh/id_vps \
             -o StrictHostKeyChecking=accept-new \
             -o BatchMode=yes \
             -o ConnectTimeout=15 \
