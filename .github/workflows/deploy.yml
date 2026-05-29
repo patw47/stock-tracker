@@ -57,7 +57,9 @@ jobs:
           # tr -d '\r' : la clé peut arriver avec des CRLF (copier-coller Windows) -> format invalide.
           printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/id_vps
           chmod 600 ~/.ssh/id_vps
-          ssh-keyscan -H "$VPS_SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          # trim espaces/CR éventuels du host (copier-coller Windows).
+          host=$(printf '%s' "$VPS_SSH_HOST" | tr -d '[:space:]')
+          ssh-keyscan -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
           # sanity check du format de clé (n'affiche pas la clé).
           if ! ssh-keygen -y -f ~/.ssh/id_vps >/dev/null 2>&1; then
             echo "::error::VPS_SSH_KEY illisible (mauvais format ou passphrase). Doit être une clé privée OpenSSH sans passphrase."
@@ -71,13 +73,16 @@ jobs:
           VPS_SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
         run: |
           set -uo pipefail
+          # trim espaces/CR éventuels (copier-coller Windows -> "hostname contains invalid characters").
+          host=$(printf '%s' "$VPS_SSH_HOST" | tr -d '[:space:]')
+          user=$(printf '%s' "$VPS_SSH_USER" | tr -d '[:space:]')
           # set +e local : on veut capturer le code retour ssh sans que bash -e tue le step.
           set +e
           out=$(ssh -i ~/.ssh/id_vps \
             -o StrictHostKeyChecking=accept-new \
             -o BatchMode=yes \
             -o ConnectTimeout=15 \
-            "${VPS_SSH_USER}@${VPS_SSH_HOST}" '
+            "${user}@${host}" '
               set -e
               git -C /opt/apps/stock-tracker fetch --prune origin
               git -C /opt/apps/stock-tracker reset --hard origin/main
