@@ -7,6 +7,23 @@ POST /synthesize -- executive-synthesis: markdown briefing + write memory
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import subprocess, json, os, time, datetime
 
+try:
+    from agents.warren.macro_provider import get_snapshot
+    from agents.warren.models import MacroSnapshot
+    from agents.warren.prompt_builder import build_prompt
+except ImportError:
+    from agents.warren.models import MacroContext as MacroSnapshot
+
+    def get_snapshot() -> MacroSnapshot:
+        """Return an empty macro snapshot when the provider hook is unavailable."""
+        return MacroSnapshot()
+
+    def build_prompt(snapshot: MacroSnapshot, query: str) -> str:
+        """Preserve existing prompt text when the prompt builder is unavailable."""
+        _ = snapshot
+        return query
+
+
 OPENCLAW_CONFIG = "/home/warren/.openclaw/openclaw.json"
 WORKSPACE = "/home/warren/.openclaw/workspace-warren"
 MEMORY_DIR = os.path.join(WORKSPACE, "memory", "tickers")
@@ -47,6 +64,15 @@ def call_warren(message, tag):
         capture_output=True, text=True, timeout=200, env=env,
     )
     return r.stdout.strip()
+
+
+def build_warren_prompt(query: str) -> str:
+    """Build Warren prompt with macro context, falling back to an empty snapshot."""
+    try:
+        snapshot = get_snapshot()
+    except Exception:
+        snapshot = MacroSnapshot()
+    return build_prompt(snapshot, query)
 
 
 def extract_inner(stdout):
@@ -164,7 +190,9 @@ class Handler(BaseHTTPRequestHandler):
                     "",
                 ]
             try:
-                stdout = call_warren("\n".join(lines), "filter")
+                query = "\n".join(lines)
+                prompt = build_warren_prompt(query)
+                stdout = call_warren(prompt, "filter")
                 inner = extract_inner(stdout)
                 start = inner.find("{")
                 end = inner.rfind("}") + 1
@@ -201,7 +229,9 @@ class Handler(BaseHTTPRequestHandler):
             lines += [f"=== {sym} ===", text.strip(), ""]
 
         try:
-            stdout = call_warren("\n".join(lines), "synth")
+            query = "\n".join(lines)
+            prompt = build_warren_prompt(query)
+            stdout = call_warren(prompt, "synth")
             raw = extract_inner(stdout)
             synthesis = _clean_synthesis(raw)
             for sym, text in news.items():

@@ -15,3 +15,7 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python bytecode (was leaking into agent commits → merge conflicts)
+__pycache__/
+*.py[cod]
