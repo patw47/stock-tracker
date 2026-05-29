@@ -109,13 +109,14 @@ jobs:
           fi
           icon() { if [ "$1" = "active" ] || [ "$1" = "ok" ]; then echo "🟢"; else echo "🔴"; fi; }
 
-          text="$emoji ${PROJECT_NAME} — ${title}
-service stock-tracker: $(icon "${st:-?}") ${st:-inconnu}
-agent warren: $(icon "${wr:-?}") ${wr:-inconnu}
-n8n health: $(icon "${hl:-?}") ${hl:-inconnu}
-run manuel: $(icon "${tr:-?}") ${tr:-inconnu}
-commit: ${HEAD_SHA:0:7}
-${run_url}"
+          text=$(printf '%s\n' \
+            "$emoji ${PROJECT_NAME} — ${title}" \
+            "service stock-tracker: $(icon "${st:-?}") ${st:-inconnu}" \
+            "agent warren: $(icon "${wr:-?}") ${wr:-inconnu}" \
+            "n8n health: $(icon "${hl:-?}") ${hl:-inconnu}" \
+            "run manuel: $(icon "${tr:-?}") ${tr:-inconnu}" \
+            "commit: ${HEAD_SHA:0:7}" \
+            "$run_url")
 
           curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TG_CHAT}" \
