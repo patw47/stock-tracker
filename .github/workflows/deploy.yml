@@ -2,6 +2,8 @@ name: Deploy to VPS
 
 # Déclenché à la fin de la CI sur main. Déploie seulement si la CI est verte
 # ET si "Notify PR merge conflicts" est vert sur le même commit.
+# Tourne sur un runner self-hosted INSTALLÉ SUR LE VPS : le déploiement s'exécute
+# en local (pas de SSH depuis le cloud — le VPS bloque le trafic retour des runners GitHub).
 on:
   workflow_run:
     workflows: ["CI"]
@@ -15,12 +17,13 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted]
     # le run manuel de validation (n8n execute) prend ~4-6 min pour 15 tickers.
     timeout-minutes: 20
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     env:
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      REPO_DIR: /opt/apps/stock-tracker
     steps:
       - name: Gate — "Notify PR merge conflicts" vert sur ce commit
         env:
@@ -28,79 +31,36 @@ jobs:
         run: |
           set -euo pipefail
           echo "Commit ciblé : $HEAD_SHA"
+          api="https://api.github.com/repos/${{ github.repository }}/actions/runs?head_sha=$HEAD_SHA&per_page=100"
           ok=""
           for i in $(seq 1 10); do
-            concl=$(gh api \
-              "repos/${{ github.repository }}/actions/runs?head_sha=$HEAD_SHA&per_page=100" \
-              --jq '.workflow_runs[] | select(.name=="Notify PR merge conflicts") | .conclusion' \
-              | head -n1 || true)
+            concl=$(curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$api" \
+              | python3 -c "import sys,json;d=json.load(sys.stdin);print(next((r['conclusion'] for r in d['workflow_runs'] if r['name']=='Notify PR merge conflicts'),''))")
             echo "tentative $i — conflits: ${concl:-<en cours>}"
             if [ "$concl" = "success" ]; then ok=1; break; fi
-            if [ "$concl" = "failure" ] || [ "$concl" = "cancelled" ] || [ "$concl" = "timed_out" ]; then
-              echo "::error::workflow conflits non vert ($concl) — déploiement bloqué"
-              exit 1
-            fi
+            case "$concl" in
+              failure|cancelled|timed_out)
+                echo "::error::workflow conflits non vert ($concl) — déploiement bloqué"; exit 1;;
+            esac
             sleep 20
           done
           if [ -z "$ok" ]; then
-            echo "::error::workflow conflits pas terminé à temps — déploiement bloqué"
-            exit 1
+            echo "::error::workflow conflits pas terminé à temps — déploiement bloqué"; exit 1
           fi
 
-      - name: Configurer la clé SSH
-        env:
-          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          VPS_SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh
-          # tr -d '\r' : la clé peut arriver avec des CRLF (copier-coller Windows) -> format invalide.
-          printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/id_vps
-          chmod 600 ~/.ssh/id_vps
-          # trim espaces/CR éventuels du host (copier-coller Windows).
-          host=$(printf '%s' "$VPS_SSH_HOST" | tr -d '[:space:]')
-          ssh-keyscan -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
-          # sanity check du format de clé (n'affiche pas la clé).
-          if ! ssh-keygen -y -f ~/.ssh/id_vps >/dev/null 2>&1; then
-            echo "::error::VPS_SSH_KEY illisible (mauvais format ou passphrase). Doit être une clé privée OpenSSH sans passphrase."
-            exit 1
-          fi
-          # empreinte (non secrète) — à comparer avec id_ed25519_vps.pub dans authorized_keys du VPS.
-          echo "[deploy.yml] fingerprint clé déployée :"
-          ssh-keygen -lf ~/.ssh/id_vps
-
-      - name: Déployer sur le VPS
+      - name: Déployer (local, sur le VPS)
         id: deploy
         env:
-          VPS_SSH_USER: ${{ secrets.VPS_SSH_USER }}
-          VPS_SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
-          # trim espaces/CR éventuels (copier-coller Windows -> "hostname contains invalid characters").
-          host=$(printf '%s' "$VPS_SSH_HOST" | tr -d '[:space:]')
-          user=$(printf '%s' "$VPS_SSH_USER" | tr -d '[:space:]')
-          # Blackhole MTU sur le chemin VPS->runner : le handshake ssh stalle (paquet retour
-          # droppé) puis sshd coupe à LoginGraceTime (~120s). On baisse le MTU du runner ->
-          # MSS plus petit -> le serveur segmente plus petit -> plus de drop.
-          iface=$(ip route show default | awk '{print $5; exit}')
-          echo "[deploy.yml] baisse MTU de $iface à 1200"
-          sudo ip link set dev "$iface" mtu 1200 || true
-          # set +e local : on veut capturer le code retour ssh sans que bash -e tue le step.
-          set +e
-          out=$(ssh -vvv -i ~/.ssh/id_vps \
-            -o StrictHostKeyChecking=accept-new \
-            -o BatchMode=yes \
-            -o ConnectTimeout=15 \
-            -o KexAlgorithms=curve25519-sha256@libssh.org,curve25519-sha256,diffie-hellman-group14-sha256 \
-            "${user}@${host}" '
-              set -e
-              git -C /opt/apps/stock-tracker fetch --prune origin
-              git -C /opt/apps/stock-tracker reset --hard origin/main
-              bash /opt/apps/stock-tracker/deploy/remote.sh
-            ' 2>&1)
+          git config --global --add safe.directory "$REPO_DIR" || true
+          # extraheader : authentifie le fetch (repo privé) sans dépendre des creds du VPS.
+          git -C "$REPO_DIR" -c http.extraheader="AUTHORIZATION: bearer $GH_TOKEN" fetch --prune origin
+          git -C "$REPO_DIR" reset --hard origin/main
+          out=$(bash "$REPO_DIR/deploy/remote.sh" 2>&1)
           rc=$?
           echo "$out"
-          echo "[deploy.yml] ssh exit code = $rc"
           get() { echo "$out" | grep -E "^$1=" | tail -n1 | cut -d= -f2; }
           {
             echo "stock_tracker=$(get STATUS_STOCK_TRACKER)"
