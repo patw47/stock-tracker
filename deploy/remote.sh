@@ -39,15 +39,29 @@ N8N_DB="$N8N_DB" WORKFLOW_JSON="$REPO/workflow.json" \
   python3 "$REPO/deploy/import_workflow.py"
 import_rc=$?
 
-# 3. Restart des services dans l'ordre des dépendances.
+# 3. Relancer la stack Warren (openclaw + bridge). Le service n8n reste ARRÊTÉ pour l'instant.
 log "restart openclaw-warren"; sudo systemctl restart openclaw-warren; sleep 2
-log "restart warren-server";  sudo systemctl restart warren-server;  sleep 2
-log "restart stock-tracker";  sudo systemctl restart stock-tracker
+log "restart warren-server";  sudo systemctl restart warren-server;  sleep 3
 
-# 4. Laisser n8n démarrer.
+# 4. Run manuel de validation PENDANT que le service n8n est arrêté : le port du task
+#    broker (5679) est libre, donc l'execute lance le sien sans conflit
+#    ("Task Broker's port 5679 is already in use" sinon). Lancé en warren (seul à lire
+#    .n8n/config -> déchiffrer les credentials) ; le bridge Warren est déjà up.
+#    NB: pipeline SKIP -> pas de briefing si aucune news du jour (comportement normal).
+log "execute workflow $WID (run de validation, service n8n arrêté)"
+sudo -u warren env \
+  N8N_USER_FOLDER="$N8N_DATA" \
+  N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false \
+  n8n execute --id="$WID"
+trigger_rc=$?
+if [ "$trigger_rc" -eq 0 ]; then trigger="ok"; else trigger="fail"; fi
+log "execute rc=$trigger_rc"
+
+# 5. Démarrer le service n8n (5679 désormais libéré par l'execute terminé).
+log "start stock-tracker"; sudo systemctl restart stock-tracker
 sleep 8
 
-# 5. Healthchecks.
+# 6. Healthchecks.
 st_active=$(systemctl is-active stock-tracker  2>/dev/null || echo inactive)
 oc_active=$(systemctl is-active openclaw-warren 2>/dev/null || echo inactive)
 ws_active=$(systemctl is-active warren-server   2>/dev/null || echo inactive)
@@ -66,23 +80,6 @@ warren_status="inactive"
 if [ "$oc_active" = "active" ] && [ "$ws_active" = "active" ] && [ "$warren_http" = "ok" ]; then
   warren_status="active"
 fi
-
-# 6. Run manuel de validation : exécute le workflow une fois pour vérifier la chaîne
-#    bout-en-bout et recevoir le briefing Telegram (si news). Lancé en tant que warren,
-#    seul à pouvoir lire .n8n/config et donc déchiffrer les credentials.
-#    NB: pipeline SKIP -> pas de briefing si aucune news du jour (comportement normal).
-#    N8N_RUNNERS_ENABLED=false : le service n8n tourne déjà et occupe le task broker
-#    (port 5679) ; on désactive les task runners pour ce process one-shot (exécution
-#    en process principal) afin d'éviter "Task Broker's port 5679 is already in use".
-log "execute workflow $WID (run manuel de validation)"
-sudo -u warren env \
-  N8N_USER_FOLDER="$N8N_DATA" \
-  N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false \
-  N8N_RUNNERS_ENABLED=false \
-  n8n execute --id="$WID"
-trigger_rc=$?
-if [ "$trigger_rc" -eq 0 ]; then trigger="ok"; else trigger="fail"; fi
-log "execute rc=$trigger_rc"
 
 overall="ok"
 if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
