@@ -295,6 +295,17 @@
           "name": "Telegram account"
         }
       }
+    },
+    {
+      "id": "node-exec-trigger",
+      "name": "Execute Trigger (deploy)",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        500
+      ],
+      "parameters": {}
     }
   ],
   "connections": {
@@ -443,6 +454,17 @@
       ]
     },
     "Schedule 16h Mon-Fri": {
+      "main": [
+        [
+          {
+            "node": "Read Tickers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Trigger (deploy)": {
       "main": [
         [
           {
