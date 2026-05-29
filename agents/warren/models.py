@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,7 +42,26 @@ class MacroContext(BaseModel):
         default=None,
         description="Qualitative tone tag: 'hawkish' | 'dovish' | 'neutral' | free text.",
     )
+    ten_year_yield: float | None = Field(
+        default=None,
+        description="10-Year Treasury constant maturity yield, percent.",
+    )
+    two_year_yield: float | None = Field(
+        default=None,
+        description="2-Year Treasury constant maturity yield, percent.",
+    )
+    market_regime: str | None = Field(
+        default=None,
+        description="Qualitative market regime: 'risk_on' | 'neutral' | 'risk_off' | 'crisis' | 'unknown'.",
+    )
+    as_of: datetime | None = Field(
+        default=None,
+        description="UTC datetime when snapshot was fetched.",
+    )
     snapshot_date: date | None = Field(
         default=None,
         description="Date the snapshot represents (not fetch time).",
     )
+
+
+MacroSnapshot = MacroContext
