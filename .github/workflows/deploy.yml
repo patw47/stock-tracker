@@ -65,6 +65,9 @@ jobs:
             echo "::error::VPS_SSH_KEY illisible (mauvais format ou passphrase). Doit être une clé privée OpenSSH sans passphrase."
             exit 1
           fi
+          # empreinte (non secrète) — à comparer avec id_ed25519_vps.pub dans authorized_keys du VPS.
+          echo "[deploy.yml] fingerprint clé déployée :"
+          ssh-keygen -lf ~/.ssh/id_vps
 
       - name: Déployer sur le VPS
         id: deploy
@@ -78,7 +81,7 @@ jobs:
           user=$(printf '%s' "$VPS_SSH_USER" | tr -d '[:space:]')
           # set +e local : on veut capturer le code retour ssh sans que bash -e tue le step.
           set +e
-          out=$(ssh -i ~/.ssh/id_vps \
+          out=$(ssh -vvv -i ~/.ssh/id_vps \
             -o StrictHostKeyChecking=accept-new \
             -o BatchMode=yes \
             -o ConnectTimeout=15 \
