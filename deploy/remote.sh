@@ -9,10 +9,14 @@ set -uo pipefail
 
 REPO="/opt/apps/stock-tracker"
 N8N_DB="$REPO/n8n-data/.n8n/database.sqlite"
+N8N_DATA="$REPO/n8n-data"
 N8N_PORT="${N8N_PORT:-5680}"
 WARREN_PORT="18795"
 
 log() { echo "[deploy] $*"; }
+
+# id du workflow canonique, lu depuis workflow.json (évite toute dérive).
+WID=$(python3 -c "import json;print(json.load(open('$REPO/workflow.json'))['id'])")
 
 # 1. Stop n8n avant l'import (évite tout verrou sqlite concurrent).
 log "stop stock-tracker"
@@ -54,16 +58,31 @@ if [ "$oc_active" = "active" ] && [ "$ws_active" = "active" ] && [ "$warren_http
   warren_status="active"
 fi
 
+# 6. Run manuel de validation : exécute le workflow une fois pour vérifier la chaîne
+#    bout-en-bout et recevoir le briefing Telegram (si news). Lancé en tant que warren,
+#    seul à pouvoir lire .n8n/config et donc déchiffrer les credentials.
+#    NB: pipeline SKIP -> pas de briefing si aucune news du jour (comportement normal).
+log "execute workflow $WID (run manuel de validation)"
+sudo -u warren env \
+  N8N_USER_FOLDER="$N8N_DATA" \
+  N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false \
+  n8n execute --id="$WID"
+trigger_rc=$?
+if [ "$trigger_rc" -eq 0 ]; then trigger="ok"; else trigger="fail"; fi
+log "execute rc=$trigger_rc"
+
 overall="ok"
 if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
-   || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ]; then
+   || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ] \
+   || [ "$trigger" != "ok" ]; then
   overall="fail"
 fi
 
-log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) import_rc=$import_rc"
+log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) import_rc=$import_rc trigger=$trigger"
 
 # Lignes machine-lisibles consommées par deploy.yml.
 echo "STATUS_STOCK_TRACKER=$st_active"
 echo "STATUS_N8N_HEALTH=$n8n_health"
 echo "STATUS_WARREN=$warren_status"
+echo "STATUS_TRIGGER=$trigger"
 echo "STATUS_OVERALL=$overall"

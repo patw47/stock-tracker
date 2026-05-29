@@ -92,8 +92,14 @@ push main → CI green ──► deploy.yml (workflow_run)
                               │        import_workflow.py  (sqlite upsert, queenp owns DB)
                               │        restart openclaw-warren → warren-server → stock-tracker
                               │        healthcheck services + n8n :5680/healthz + bridge :18795
+                              │        n8n execute --id=<wf>  (manual validation run, as warren)
                               └─ Telegram status (✅/❌ + PROJECT_NAME + per-service state)
 ```
+
+**Manual validation run** — after restart, `remote.sh` runs `n8n execute` once
+(as `warren`, the only user able to read `.n8n/config` to decrypt credentials) so the
+full chain is exercised and the briefing lands in Telegram. With SKIP logic, no briefing
+is sent if there's no fresh news — that's expected; the deploy status message still arrives.
 
 **Roles** — `queenp` runs the infra (git, sqlite, systemctl via passwordless sudo);
 `warren` is only the OpenClaw agent user (limited access).

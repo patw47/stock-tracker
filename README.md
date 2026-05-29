@@ -424,8 +424,14 @@ push main → CI green ──► .github/workflows/deploy.yml
                               │        import_workflow.py  (upsert workflow into sqlite)
                               │        restart openclaw-warren → warren-server → stock-tracker
                               │        healthcheck: services + n8n :5680/healthz + bridge :18795
+                              │        n8n execute (manual validation run, as warren)
                               └─ Telegram status message (success / failure + per-service state)
 ```
+
+After restarting, the deploy runs the workflow **once** (`n8n execute`, as `warren` — the
+only user able to read `.n8n/config` to decrypt credentials) so you receive the briefing in
+Telegram and can confirm the run end-to-end. If there's no fresh news the SKIP logic sends
+no briefing, but the deploy status message still arrives.
 
 ### Roles
 
