@@ -411,68 +411,93 @@ curl -s http://localhost:5680/healthz
 
 ## Continuous deployment (GitHub Actions → VPS)
 
-Pushing to `main` auto-deploys to the VPS once CI is green.
+Pushing to `main` auto-deploys to the VPS once CI is green. The deploy job runs on a
+**self-hosted GitHub Actions runner installed on the VPS** (no SSH).
 
 ```
-push main → CI green ──► .github/workflows/deploy.yml
+push main → CI green ──► .github/workflows/deploy.yml  (runs-on: self-hosted)
                               │
                               ├─ gate: "Notify PR merge conflicts" green on same commit
-                              ├─ SSH queenp@VPS
-                              │     git fetch + reset --hard origin/main
-                              │     deploy/remote.sh:
-                              │        stop stock-tracker  (release sqlite lock)
-                              │        import_workflow.py  (upsert workflow into sqlite)
-                              │        restart openclaw-warren → warren-server → stock-tracker
-                              │        healthcheck: services + n8n :5680/healthz + bridge :18795
-                              │        n8n execute (manual validation run, as warren)
-                              └─ Telegram status message (success / failure + per-service state)
+                              ├─ git fetch (token-auth) + reset --hard origin/main
+                              └─ deploy/remote.sh (local on the VPS):
+                                   pip install -r requirements.txt
+                                   stop stock-tracker  (release sqlite lock + free port 5679)
+                                   import_workflow.py  (upsert workflow into sqlite)
+                                   restart openclaw-warren → warren-server
+                                   n8n execute --id  (validation run, as warren, n8n stopped)
+                                   start stock-tracker
+                                   healthcheck: services + n8n :5680/healthz + bridge :18795
+                              → Telegram status message (success / failure + per-service state)
 ```
 
-After restarting, the deploy runs the workflow **once** (`n8n execute`, as `warren` — the
-only user able to read `.n8n/config` to decrypt credentials) so you receive the briefing in
-Telegram and can confirm the run end-to-end. If there's no fresh news the SKIP logic sends
-no briefing, but the deploy status message still arrives.
+### Why a self-hosted runner (not cloud SSH)
+
+GitHub's cloud runners cannot reach this VPS: the SSH return traffic is blackholed (the
+handshake stalls to sshd's `LoginGraceTime`, ~120s, regardless of MTU/KEX tuning — the VPS
+firewall drops GitHub runner IPs). A runner installed on the VPS (`actions.runner.*`
+systemd service, user `queenp`) runs the deploy locally, so there's no SSH at all.
+
+### Validation run
+
+The deploy runs the workflow **once** via `n8n execute --id` so you receive the briefing in
+Telegram and can confirm the chain end-to-end. Two constraints handled:
+
+- run **as `warren`** — the only user able to read `.n8n/config` to decrypt credentials;
+- run **while the n8n service is stopped** — otherwise its task-runner broker (port 5679)
+  clashes (`Task Broker's port 5679 is already in use`);
+- the workflow carries an **Execute Workflow Trigger** node (besides the Schedule Trigger)
+  because `n8n execute` cannot start from a schedule trigger.
+
+If there's no fresh news the SKIP logic sends no briefing, but the deploy status message
+still arrives.
 
 ### Roles
 
-- **`queenp`** — infra user. SSH target. Owns `database.sqlite`, has passwordless `sudo`.
-  Runs git, the sqlite import, and `systemctl restart`.
-- **`warren`** — OpenClaw agent user only, limited access. Not used by the deploy.
+- **`queenp`** — infra user. Hosts the runner. Owns `database.sqlite`, has passwordless
+  `sudo`. Runs git, the sqlite import, `systemctl`, and the validation `execute` (via
+  `sudo -u warren`).
+- **`warren`** — OpenClaw agent user only, limited access. Owns `.n8n/config`.
 
 ### Why a custom workflow importer
 
-`n8n import:workflow` fails on this VPS — the n8n CLI run as `warren` hits `EACCES` on
-`/opt/apps/stock-tracker/n8n-data/.n8n/config` (mode `600`, owned by `warren`). So
+`n8n import:workflow` fails on this VPS — the n8n CLI hits `EACCES` on
+`/opt/apps/stock-tracker/n8n-data/.n8n/config` (ACL mask `---`). So
 `deploy/import_workflow.py` (run as `queenp`, owner of `database.sqlite`) writes
 `workflow.json` directly into the n8n database:
 
 - upserts the workflow from `workflow.json` (`veille-boursiere-001`) with `active=1`
-- deactivates every other workflow → enforces a **single active workflow** and removes
+- deactivates every other workflow → enforces a **single active workflow** and removed
   the legacy `48dff814-…` ("Veille Boursière Quotidienne")
 - introspects the schema (`PRAGMA table_info`) so it survives n8n version changes
-
-n8n is stopped during the import to avoid sqlite lock contention, then all three
-services are restarted.
 
 ### Required GitHub secrets
 
 | Secret | Purpose |
 |---|---|
-| `VPS_SSH_HOST` | VPS IP/host (e.g. `77.42.72.164`) |
-| `VPS_SSH_USER` | SSH user (`queenp`) |
-| `VPS_SSH_KEY` | Private SSH key (full `-----BEGIN…END-----` block) |
 | `TELEGRAM_ORCHESTRATION_BOT_TOKEN` | Bot token for the status message |
 | `TELEGRAM_ORCHESTRATION_CHAT_ID` | Target chat for the status message |
 | `PROJECT_NAME` | Project label shown in the status message |
 
-### Manual run
+No SSH secrets are needed (self-hosted runner). The git fetch authenticates with the
+repo-scoped `GITHUB_TOKEN`.
 
-The deploy auto-triggers after CI, but you can also re-run it from the **Actions** tab
-(select the latest *Deploy to VPS* run → *Re-run jobs*), or run the steps by hand on the
-VPS:
+### Installing the runner (one-time, on the VPS as `queenp`)
 
 ```bash
-ssh queenp@<vps-ip>
+sudo mkdir -p /opt/apps/actions-runner && sudo chown queenp:queenp /opt/apps/actions-runner
+cd /opt/apps/actions-runner
+curl -o runner.tar.gz -L https://github.com/actions/runner/releases/download/v2.334.0/actions-runner-linux-x64-2.334.0.tar.gz
+tar xzf runner.tar.gz
+# token from repo → Settings → Actions → Runners → New self-hosted runner
+./config.sh --unattended --url https://github.com/patw47/stock-tracker --token <RUNNER_TOKEN> --name vps-queenp
+sudo ./svc.sh install queenp && sudo ./svc.sh start
+```
+
+### Manual run
+
+Re-run from the **Actions** tab (latest *Deploy to VPS* run → *Re-run jobs*), or on the VPS:
+
+```bash
 git -C /opt/apps/stock-tracker pull
 bash /opt/apps/stock-tracker/deploy/remote.sh
 ```
