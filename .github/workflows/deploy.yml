@@ -81,10 +81,13 @@ jobs:
           user=$(printf '%s' "$VPS_SSH_USER" | tr -d '[:space:]')
           # set +e local : on veut capturer le code retour ssh sans que bash -e tue le step.
           set +e
-          out=$(ssh -vvv -i ~/.ssh/id_vps \
+          # KexAlgorithms classique : le KEX post-quantique (sntrup761) envoie un gros
+          # paquet qui se fait blackholer (MTU) entre le runner GitHub et le VPS -> hang.
+          out=$(ssh -i ~/.ssh/id_vps \
             -o StrictHostKeyChecking=accept-new \
             -o BatchMode=yes \
             -o ConnectTimeout=15 \
+            -o KexAlgorithms=curve25519-sha256@libssh.org,curve25519-sha256,diffie-hellman-group14-sha256 \
             "${user}@${host}" '
               set -e
               git -C /opt/apps/stock-tracker fetch --prune origin
