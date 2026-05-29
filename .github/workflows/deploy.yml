@@ -83,8 +83,8 @@ jobs:
           # droppé) puis sshd coupe à LoginGraceTime (~120s). On baisse le MTU du runner ->
           # MSS plus petit -> le serveur segmente plus petit -> plus de drop.
           iface=$(ip route show default | awk '{print $5; exit}')
-          echo "[deploy.yml] baisse MTU de $iface à 1360"
-          sudo ip link set dev "$iface" mtu 1360 || true
+          echo "[deploy.yml] baisse MTU de $iface à 1200"
+          sudo ip link set dev "$iface" mtu 1200 || true
           # set +e local : on veut capturer le code retour ssh sans que bash -e tue le step.
           set +e
           out=$(ssh -vvv -i ~/.ssh/id_vps \
