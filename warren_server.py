@@ -24,9 +24,10 @@ except ImportError:
     MacroProvider = None
 
 try:
-    from agents.warren.macro_provider import get_snapshot
+    from agents.warren.macro_provider import get_snapshot, fetch_macro_snapshot
 except ImportError:
     get_snapshot = None
+    fetch_macro_snapshot = None
 
 try:
     from agents.warren.models import MacroContext
@@ -113,9 +114,17 @@ def fetch_macro_context() -> MacroContext | None:
 
 
 def build_warren_prompt(query: str) -> str:
-    """Build Warren prompt with macro context when available."""
-    macro_context = fetch_macro_context()
-    return build_prompt(macro_context, query)
+    """Build Warren prompt with macro snapshot when available."""
+    macro_snapshot = None
+    if fetch_macro_snapshot is not None:
+        try:
+            macro_snapshot = asyncio.run(fetch_macro_snapshot())
+        except Exception as exc:
+            logger.warning("Failed to fetch macro snapshot: %s", exc)
+    if macro_snapshot is None:
+        macro_context = fetch_macro_context()
+        return build_prompt(macro_context, query)
+    return build_prompt(None, query, macro_snapshot=macro_snapshot)
 
 
 def extract_inner(stdout):
