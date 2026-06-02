@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from agents.warren.models import MacroContext, MacroSnapshot
+from agents.warren.models import MacroContext, MacroSnapshot, UpcomingEvent
 
 
 class TestMacroContextInstantiation:
@@ -95,11 +95,45 @@ class TestMacroContextValidation:
         assert ctx.sector_flows == {"XLK": 1.0, "XLE": -2.0}
 
 
-class TestMacroSnapshotAlias:
-    def test_macro_snapshot_is_macro_context(self) -> None:
-        assert MacroSnapshot is MacroContext
-
+class TestMacroSnapshotInstantiation:
     def test_macro_snapshot_instantiates(self) -> None:
-        snap = MacroSnapshot(policy_rate=5.25, vix=18.0)
-        assert snap.policy_rate == 5.25
-        assert isinstance(snap, MacroContext)
+        snap = MacroSnapshot(
+            fed_stance="hawkish",
+            dollar_signal="USD strengthening on rate expectations",
+            geopolitical_notes="Taiwan tensions remain elevated",
+            overall_sentiment="risk-on",
+            upcoming_events=[
+                {"name": "Fed Decision", "date": "2026-06-18"},
+                {"name": "CPI Release", "date": "2026-06-12"},
+            ],
+        )
+        assert snap.fed_stance == "hawkish"
+        assert snap.dollar_signal == "USD strengthening on rate expectations"
+        assert snap.overall_sentiment == "risk-on"
+        assert len(snap.upcoming_events) == 2
+
+    def test_macro_snapshot_frozen(self) -> None:
+        snap = MacroSnapshot(
+            fed_stance="neutral",
+            dollar_signal="USD stable",
+            geopolitical_notes="No major threats",
+            overall_sentiment="neutral",
+            upcoming_events=[],
+        )
+        with pytest.raises(Exception):
+            snap.fed_stance = "dovish"  # type: ignore[misc]
+
+    def test_macro_snapshot_rejects_extra_fields(self) -> None:
+        with pytest.raises(ValidationError):
+            MacroSnapshot(  # type: ignore[call-arg]
+                fed_stance="dovish",
+                dollar_signal="Weak",
+                geopolitical_notes="Notes",
+                overall_sentiment="risk-off",
+                upcoming_events=[],
+                unknown_field="oops",
+            )
+
+    def test_macro_snapshot_requires_all_fields(self) -> None:
+        with pytest.raises(ValidationError):
+            MacroSnapshot(fed_stance="hawkish")  # type: ignore[call-arg]

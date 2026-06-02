@@ -6,11 +6,11 @@ from datetime import datetime, timezone
 
 import requests
 
-from agents.warren.models import MacroContext, MacroSnapshot
+from agents.warren.models import MacroContext
 
 logger = logging.getLogger(__name__)
 
-_FALLBACK_SNAPSHOT: MacroSnapshot = MacroSnapshot(
+_FALLBACK_SNAPSHOT: MacroContext = MacroContext(
     policy_rate=5.25,
     cpi_yoy=3.5,
     pce_yoy=2.8,
@@ -108,8 +108,8 @@ def _derive_market_regime(vix: float | None, spread_10y2y: float | None) -> str:
     return "neutral"
 
 
-def get_snapshot() -> MacroSnapshot:
-    """Fetch live macro indicators from FRED and return a MacroSnapshot.
+def get_snapshot() -> MacroContext:
+    """Fetch live macro indicators from FRED and return a MacroContext.
 
     Live FRED series:
       FEDFUNDS      — Fed funds effective rate
@@ -157,7 +157,7 @@ def get_snapshot() -> MacroSnapshot:
         return _FALLBACK_SNAPSHOT
 
     fb = _FALLBACK_SNAPSHOT
-    return MacroSnapshot(
+    return MacroContext(
         policy_rate=fed_rate if fed_rate is not None else fb.policy_rate,
         cpi_yoy=cpi if cpi is not None else fb.cpi_yoy,
         pce_yoy=pce,
