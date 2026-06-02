@@ -92,7 +92,8 @@
     },
     {
       "parameters": {
-        "jsCode": "const data = $json;\nconst prep = $('Prepare Haiku Request').item.json;\nconst symbol = prep.symbol;\nconst sector = prep.sector;\nconst status = prep.status;\n\nlet text = '';\nif (data.content && Array.isArray(data.content)) {\n  for (const block of data.content) {\n    if (block.type === 'text') text += block.text;\n  }\n}\nif (data.error) text = 'NO_NEWS_TODAY';\n\nreturn [{ json: { symbol, sector, status, rawNews: text.trim() || 'NO_NEWS_TODAY' } }];"
+        "jsCode": "const data = $json;\nconst prep = $('Prepare Haiku Request').item.json;\nconst symbol = prep.symbol;\nconst sector = prep.sector;\nconst status = prep.status;\n\nlet text = '';\nif (data.content && Array.isArray(data.content)) {\n  for (const block of data.content) {\n    if (block.type === 'text') text += block.text;\n  }\n}\nif (data.error) text = 'NO_NEWS_TODAY';\n\nreturn { json: { symbol, sector, status, rawNews: text.trim() || 'NO_NEWS_TODAY' } };",
+        "mode": "runOnceForEachItem"
       },
       "id": "node-extract-news",
       "name": "Extract Raw News",

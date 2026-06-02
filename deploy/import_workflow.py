@@ -6,7 +6,7 @@ Contourne `n8n import:workflow`, bloqué par les permissions de
 que queenp — propriétaire de `database.sqlite` — avec n8n arrêté.
 
 - UPSERT du workflow canonique (id lu dans workflow.json) avec active=1
-- désactive tout AUTRE workflow actif pour éviter les doublons de briefing
+- désactive tout AUTRE workflow et remet son triggerCount à 0 pour éviter les doublons de briefing
   (ex. le legacy 48dff814-… "Veille Boursière Quotidienne")
 
 Variables d'environnement :
@@ -72,19 +72,37 @@ def main() -> None:
         )
         print(f"[import] inserted workflow {wid}")
 
-    # Un seul workflow actif à la fois.
+    # Un seul workflow actif à la fois. n8n peut garder un schedule enregistré si
+    # triggerCount reste à 1 même après active=0, donc on le remet aussi à zéro.
     if "active" in cols:
+        set_parts = ["active=0"]
+        if "triggerCount" in cols:
+            set_parts.append('"triggerCount"=0')
+        if "isArchived" in cols:
+            set_parts.append('"isArchived"=1')
         cur.execute(
-            "UPDATE workflow_entity SET active=0 WHERE id<>? AND active=1", (wid,)
+            f"UPDATE workflow_entity SET {', '.join(set_parts)} WHERE id<>?",
+            (wid,),
         )
         if cur.rowcount:
-            print(f"[import] deactivated {cur.rowcount} other active workflow(s)")
+            print(f"[import] disabled {cur.rowcount} other workflow(s)")
 
     con.commit()
 
     print("[import] état final :")
-    for r in cur.execute("SELECT id, active, name FROM workflow_entity"):
-        print(f"[import]   {r['id']} active={r['active']} {r['name']}")
+    display_cols = ["id", "active", "name"]
+    if "triggerCount" in cols:
+        display_cols.append("triggerCount")
+    if "isArchived" in cols:
+        display_cols.append("isArchived")
+    for r in cur.execute(f"SELECT {', '.join(display_cols)} FROM workflow_entity"):
+        extras = []
+        if "triggerCount" in cols:
+            extras.append(f"triggerCount={r['triggerCount']}")
+        if "isArchived" in cols:
+            extras.append(f"isArchived={r['isArchived']}")
+        suffix = " " + " ".join(extras) if extras else ""
+        print(f"[import]   {r['id']} active={r['active']}{suffix} {r['name']}")
 
     con.close()
 

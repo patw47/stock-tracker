@@ -132,9 +132,10 @@ class TestWarrenServer:
             assert isinstance(response["synthesis"], str)
 
     def test_server_filter_endpoint_with_no_news(self):
-        """Verify /filter endpoint handles NO_NEWS_TODAY correctly."""
+        """Verify /filter bootstraps empty memory before skipping NO_NEWS_TODAY."""
         import json
 
+        import warren_server
         from warren_server import Handler
 
         handler = mock.MagicMock(spec=Handler)
@@ -142,11 +143,37 @@ class TestWarrenServer:
         request_body = {
             "news": {"AAPL": "NO_NEWS_TODAY", "MSFT": "Microsoft gained 1.5% today"}
         }
-        result = Handler.handle_filter(handler, request_body)
+
+        with mock.patch.object(warren_server, "read_memory", return_value=""):
+            result = Handler.handle_filter(handler, request_body)
+
+        response = json.loads(result)
+        assert "AAPL" in response.get("new", [])
+        assert "MSFT" in response.get("new", [])
+
+        with mock.patch.object(warren_server, "read_memory", return_value="## prior\nNO_NEWS_TODAY"):
+            result = Handler.handle_filter(handler, request_body)
 
         response = json.loads(result)
         assert "AAPL" in response.get("skip", [])
         assert "MSFT" in response.get("new", [])
+
+    def test_extract_inner_handles_logged_json_and_no_reply(self):
+        """Verify OpenClaw JSON logs do not leak into Telegram output."""
+        import json
+
+        from warren_server import extract_inner
+
+        payload = {
+            "result": {
+                "payloads": [{"text": "# Brief propre"}],
+                "finalAssistantVisibleText": "NO_REPLY",
+            }
+        }
+
+        result = extract_inner("startup log\n" + json.dumps(payload))
+
+        assert result == "# Brief propre"
 
 
 class TestMacroContextModel:

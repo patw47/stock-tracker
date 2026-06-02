@@ -122,23 +122,47 @@ def extract_inner(stdout):
     """Extract response text from OpenClaw JSON envelope.
     OpenClaw --json: {"result": {"payloads": [...], "finalAssistantVisibleText": "..."}}
     """
+    def decode_json_object(text):
+        decoder = json.JSONDecoder()
+        for i, ch in enumerate(text):
+            if ch != "{":
+                continue
+            try:
+                obj, _ = decoder.raw_decode(text[i:])
+                if isinstance(obj, dict):
+                    return obj
+            except json.JSONDecodeError:
+                continue
+        return None
+
     try:
         outer = json.loads(stdout)
+    except Exception:
+        outer = decode_json_object(stdout)
+
+    if outer:
         result_obj = outer.get("result", {})
         fat = result_obj.get("finalAssistantVisibleText")
-        if fat:
+        if fat and fat != "NO_REPLY":
             return fat
         payloads = result_obj.get("payloads", [])
         if payloads and isinstance(payloads, list):
             all_text = "\n".join(p.get("text", "") for p in payloads if p.get("text"))
             if all_text:
                 return all_text
+        raw = result_obj.get("finalAssistantRawText")
+        if raw and raw != "NO_REPLY":
+            return raw
         for key in ("response", "content", "message", "text", "output"):
             if key in outer and isinstance(outer[key], str):
                 return outer[key]
-        return stdout
-    except Exception:
-        return stdout
+    return stdout
+
+
+def is_no_news(text):
+    """Treat Haiku's verbose refusals around NO_NEWS_TODAY as no-news results."""
+    normalized = (text or "").strip()
+    return not normalized or "NO_NEWS_TODAY" in normalized
 
 
 def _clean_synthesis(text):
@@ -185,24 +209,24 @@ class Handler(BaseHTTPRequestHandler):
         """Classify tickers as NEW vs SKIP.
 
         Python-level rules (no Warren call needed for first two):
-          - NO_NEWS_TODAY              -> SKIP
-          - has news + empty memory   -> NEW  (bootstrap: any news counts)
+          - empty memory               -> NEW  (bootstrap: capture first response)
+          - NO_NEWS_TODAY + memory     -> SKIP
           - has news + non-empty memory -> ask Warren for semantic dedup
         """
         news = body.get("news", {})
         today = datetime.date.today().isoformat()
 
-        auto_new = {}     # empty memory + has news
+        auto_new = {}     # empty memory bootstrap
         auto_skip = {}    # NO_NEWS_TODAY or empty text
         check_dedup = {}  # non-empty memory + has news -> Warren
 
         for sym, text in news.items():
             text_clean = text.strip() if text else ""
             mem = read_memory(sym)
-            if not text_clean or text_clean == "NO_NEWS_TODAY":
+            if not mem:
+                auto_new[sym] = "Bootstrap - first response captured (no prior memory)"
+            elif is_no_news(text_clean):
                 auto_skip[sym] = "No news found"
-            elif not mem:
-                auto_new[sym] = "First entry - latest news captured (no prior memory)"
             else:
                 check_dedup[sym] = (text_clean, mem)
 
@@ -261,6 +285,9 @@ class Handler(BaseHTTPRequestHandler):
         news = body.get("news", {})
         today = datetime.date.today().isoformat()
 
+        if not news:
+            return json.dumps({"synthesis": "Aucune actualité pertinente aujourd'hui."})
+
         lines = [
             "[EXECUTIVE-SYNTHESIS SKILL]",
             f"DATE: {today}",
@@ -278,8 +305,8 @@ class Handler(BaseHTTPRequestHandler):
             raw = extract_inner(stdout)
             synthesis = _clean_synthesis(raw)
             for sym, text in news.items():
-                if text.strip():
-                    write_memory(sym, text, today)
+                text_clean = text.strip() if text else "NO_NEWS_TODAY"
+                write_memory(sym, text_clean, today)
         except Exception as e:
             synthesis = f"Synthesis error: {e}"
         return json.dumps({"synthesis": synthesis})
