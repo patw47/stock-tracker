@@ -2,15 +2,19 @@
 
 Usage::
 
-    from agents.warren.models import MacroContext
+    from agents.warren.models import MacroContext, MacroSnapshot
     from agents.warren.prompt_builder import build_prompt
 
+    # Legacy path — MacroContext only
     prompt = build_prompt(macro_context, query)
     prompt_no_macro = build_prompt(None, query)  # macro section omitted
+
+    # New path — MacroSnapshot + optional briefing date
+    prompt = build_prompt(None, query, macro_snapshot=snap, briefing_date="2026-06-02")
 """
 from __future__ import annotations
 
-from agents.warren.models import MacroContext
+from agents.warren.models import MacroContext, MacroSnapshot
 
 _SYSTEM_PERSONA = """\
 === IDENTITY ===
@@ -57,24 +61,42 @@ for its own sake."""
 
 _OUTPUT_STRUCTURE = """\
 === OUTPUT FORMAT ===
-Structure every response using exactly these section headers, in this order:
+Structure every daily briefing response using exactly this template, in this order:
 
-**Summary** — two to three sentences: what the company does and the single most important \
-investment insight.
+📈 Veille du {date}
+🌍 MACRO DU JOUR
+- Fed : {fed_stance}
+- Dollar/inflation : {dollar_signal}
+- Géopolitique : {geopolitical_notes}
+→ Ambiance générale : {overall_sentiment}
+- Prochaines News: {upcoming_events}
+────────────────────────
+📊 PORTEFEUILLE — À FAIRE AUJOURD'HUI
+✅ RENFORCER    {tickers}
+⚠️ CONSERVER    {tickers}
+🔴 ALLÉGER      {tickers}
+{per_ticker_block}
+────────────────────────
+👀 WATCHLIST — OPPORTUNITÉS
+🟢 ACHETER     {tickers}
+⏳ ATTENDRE    {tickers}
+🚫 IGNORER     {tickers}
+{per_ticker_block}
+────────────────────────
+⚠️ ALERTES
+{alert_lines}
 
-**Key Strengths** — bullet list, three to five items, each grounded in specific evidence \
-(not generic praise).
+Per-ticker block format — signal line first, NO headings:
+  {TICKER} {emoji} {action_label}
+  {one_line_justification}
+  → {conclusion}
 
-**Key Risks** — bullet list, two to four items. Focus on permanent capital impairment, not \
-volatility.
-
-**Valuation Take** — one paragraph: intrinsic value range estimate, current price context, \
-explicit margin of safety or lack thereof.
-
-**Verdict** — one sentence. Format: `[Accumulate | Hold | Avoid | Reduce] — <rationale>.`
-
-Rules: no sections beyond the five above; no filler; if data is insufficient for a section \
-write "Insufficient data — <what is missing>." rather than speculating."""
+Output rules:
+1. NEVER use # markdown headings anywhere in the output.
+2. NEVER include raw percentage numbers for CPI/PCE — use sentiment only.
+3. Signal/recommendation must appear on the FIRST line of each ticker entry.
+4. Keep justifications to one sentence maximum.
+5. Alerts section must flag any ticker symbol that looks incorrect or ambiguous."""
 
 _N8N_SKILL_OUTPUT_RULES = """\
 === N8N SKILL OUTPUT RULES ===
@@ -149,6 +171,24 @@ def _interpret_regime(regime: str | None) -> str:
     return mapping.get(regime.lower(), "")
 
 
+def _render_macro_snapshot(snap: MacroSnapshot, briefing_date: str | None = None) -> str:
+    date_str = briefing_date or "aujourd'hui"
+    if snap.upcoming_events:
+        events_str = "; ".join(f"{e.name} ({e.date})" for e in snap.upcoming_events)
+    else:
+        events_str = "Aucun"
+    lines = [
+        "=== MACRO DU JOUR ===",
+        f"Date              : {date_str}",
+        f"Fed               : {snap.fed_stance}",
+        f"Dollar/inflation  : {snap.dollar_signal}",
+        f"Géopolitique      : {snap.geopolitical_notes}",
+        f"Ambiance générale : {snap.overall_sentiment}",
+        f"Prochaines News   : {events_str}",
+    ]
+    return "\n".join(lines)
+
+
 def _render_macro(macro: MacroContext) -> str:
     flows_str: str
     if macro.sector_flows is None:
@@ -177,24 +217,24 @@ def _render_macro(macro: MacroContext) -> str:
     return "\n".join(lines)
 
 
-def _is_n8n_skill_query(query: str) -> bool:
-    return "[TICKER-WATCH SKILL]" in query or "[EXECUTIVE-SYNTHESIS SKILL]" in query
-
-
-def build_prompt(macro_context: MacroContext | None, query: str) -> str:
+def build_prompt(
+    macro_context: MacroContext | None,
+    query: str,
+    *,
+    macro_snapshot: MacroSnapshot | None = None,
+    briefing_date: str | None = None,
+) -> str:
     """Assemble the full prompt for a Warren LLM call.
 
-    When macro_context is None the macro section is omitted and the prompt
-    remains fully functional — Warren's persona and the user query are always
-    included.
+    Priority: macro_snapshot > macro_context for the macro context section.
+    When both are None the macro section is omitted.
+    New callers should prefer macro_snapshot + briefing_date; macro_context
+    remains supported until warren-orchestration-wiring migrates.
     """
-    user_section = f"=== USER QUERY ===\n{query}"
-    parts = [_SYSTEM_PERSONA]
-    if _is_n8n_skill_query(query):
-        parts.append(_N8N_SKILL_OUTPUT_RULES)
-    else:
-        parts.append(_OUTPUT_STRUCTURE)
-    if macro_context is not None:
+    parts = [_SYSTEM_PERSONA, _OUTPUT_STRUCTURE]
+    if macro_snapshot is not None:
+        parts.append(_render_macro_snapshot(macro_snapshot, briefing_date))
+    elif macro_context is not None:
         parts.append(_render_macro(macro_context))
-    parts.append(user_section)
+    parts.append(f"=== USER QUERY ===\n{query}")
     return "\n\n".join(parts)

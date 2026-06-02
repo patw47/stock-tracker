@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -88,4 +89,30 @@ class MacroContext(BaseModel):
     )
 
 
-MacroSnapshot = MacroContext
+class UpcomingEvent(BaseModel):
+    """Scheduled economic or geopolitical event."""
+
+    name: str
+    date: str
+
+
+class MacroSnapshot(BaseModel):
+    """Qualitative macro snapshot for market narrative synthesis.
+
+    Contains only directional, human-readable macro context — no raw numbers.
+    This design ensures Warren synthesizes market sentiment from forward-looking
+    signals (Fed tone, geopolitical risks, upcoming events) rather than
+    mechanically digesting CPI/PCE figures.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    fed_stance: Literal["hawkish", "dovish", "neutral"]
+    dollar_signal: str = Field(
+        description="Short directional description of USD strength/weakness, no raw numbers."
+    )
+    geopolitical_notes: str = Field(
+        description="Summary of active geopolitical risks and their market relevance."
+    )
+    overall_sentiment: Literal["risk-on", "risk-off", "neutral"]
+    upcoming_events: list[UpcomingEvent]

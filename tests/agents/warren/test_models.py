@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from agents.warren.models import MacroContext, MacroSnapshot
+from agents.warren.models import MacroContext, MacroSnapshot, UpcomingEvent
 
 
 class TestMacroContextInstantiation:
@@ -95,11 +95,102 @@ class TestMacroContextValidation:
         assert ctx.sector_flows == {"XLK": 1.0, "XLE": -2.0}
 
 
-class TestMacroSnapshotAlias:
-    def test_macro_snapshot_is_macro_context(self) -> None:
-        assert MacroSnapshot is MacroContext
-
+class TestMacroSnapshotInstantiation:
     def test_macro_snapshot_instantiates(self) -> None:
-        snap = MacroSnapshot(policy_rate=5.25, vix=18.0)
-        assert snap.policy_rate == 5.25
-        assert isinstance(snap, MacroContext)
+        snap = MacroSnapshot(
+            fed_stance="hawkish",
+            dollar_signal="USD strengthening on rate expectations",
+            geopolitical_notes="Taiwan tensions remain elevated",
+            overall_sentiment="risk-on",
+            upcoming_events=[
+                {"name": "Fed Decision", "date": "2026-06-18"},
+                {"name": "CPI Release", "date": "2026-06-12"},
+            ],
+        )
+        assert snap.fed_stance == "hawkish"
+        assert snap.dollar_signal == "USD strengthening on rate expectations"
+        assert snap.overall_sentiment == "risk-on"
+        assert len(snap.upcoming_events) == 2
+
+    def test_macro_snapshot_frozen(self) -> None:
+        snap = MacroSnapshot(
+            fed_stance="neutral",
+            dollar_signal="USD stable",
+            geopolitical_notes="No major threats",
+            overall_sentiment="neutral",
+            upcoming_events=[],
+        )
+        with pytest.raises(Exception):
+            snap.fed_stance = "dovish"  # type: ignore[misc]
+
+    def test_macro_snapshot_rejects_extra_fields(self) -> None:
+        with pytest.raises(ValidationError):
+            MacroSnapshot(  # type: ignore[call-arg]
+                fed_stance="dovish",
+                dollar_signal="Weak",
+                geopolitical_notes="Notes",
+                overall_sentiment="risk-off",
+                upcoming_events=[],
+                unknown_field="oops",
+            )
+
+    def test_macro_snapshot_requires_all_fields(self) -> None:
+        with pytest.raises(ValidationError):
+            MacroSnapshot(fed_stance="hawkish")  # type: ignore[call-arg]
+
+    def test_fed_stance_rejects_invalid_value(self) -> None:
+        with pytest.raises(ValidationError):
+            MacroSnapshot(
+                fed_stance="very_hawkish",  # type: ignore[arg-type]
+                dollar_signal="USD strong",
+                geopolitical_notes="None",
+                overall_sentiment="neutral",
+                upcoming_events=[],
+            )
+
+    def test_overall_sentiment_rejects_invalid_value(self) -> None:
+        with pytest.raises(ValidationError):
+            MacroSnapshot(
+                fed_stance="neutral",
+                dollar_signal="USD stable",
+                geopolitical_notes="None",
+                overall_sentiment="bullish",  # type: ignore[arg-type]
+                upcoming_events=[],
+            )
+
+    def test_fed_stance_accepts_all_valid_values(self) -> None:
+        for stance in ("hawkish", "dovish", "neutral"):
+            snap = MacroSnapshot(
+                fed_stance=stance,  # type: ignore[arg-type]
+                dollar_signal="USD stable",
+                geopolitical_notes="None",
+                overall_sentiment="neutral",
+                upcoming_events=[],
+            )
+            assert snap.fed_stance == stance
+
+    def test_overall_sentiment_accepts_all_valid_values(self) -> None:
+        for sentiment in ("risk-on", "risk-off", "neutral"):
+            snap = MacroSnapshot(
+                fed_stance="neutral",
+                dollar_signal="USD stable",
+                geopolitical_notes="None",
+                overall_sentiment=sentiment,  # type: ignore[arg-type]
+                upcoming_events=[],
+            )
+            assert snap.overall_sentiment == sentiment
+
+
+class TestUpcomingEvent:
+    def test_upcoming_event_requires_name(self) -> None:
+        with pytest.raises(ValidationError):
+            UpcomingEvent(date="2026-06-18")  # type: ignore[call-arg]
+
+    def test_upcoming_event_requires_date(self) -> None:
+        with pytest.raises(ValidationError):
+            UpcomingEvent(name="Fed Decision")  # type: ignore[call-arg]
+
+    def test_upcoming_event_accepts_both_fields(self) -> None:
+        event = UpcomingEvent(name="Fed Decision", date="2026-06-18")
+        assert event.name == "Fed Decision"
+        assert event.date == "2026-06-18"
