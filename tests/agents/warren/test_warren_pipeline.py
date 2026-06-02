@@ -175,6 +175,25 @@ class TestWarrenServer:
 
         assert result == "# Brief propre"
 
+    def test_extract_inner_no_reply_without_payload_returns_text_fallback(self):
+        """Verify empty OpenClaw assistant output still returns Telegram-safe text."""
+        import json
+
+        from warren_server import extract_inner
+
+        payload = {
+            "result": {
+                "payloads": [],
+                "finalAssistantVisibleText": "NO_REPLY",
+                "finalAssistantRawText": "NO_REPLY",
+            }
+        }
+
+        result = extract_inner("startup log\n" + json.dumps(payload))
+
+        assert "NO_REPLY" in result
+        assert not result.lstrip().startswith("{")
+
 
 class TestMacroContextModel:
     """Test MacroContext data model validation."""

@@ -92,6 +92,27 @@ class TestBuildPromptWithoutMacroContext:
         assert "SYSTEM PERSONA" in result or "Warren" in result
 
 
+class TestBuildPromptForN8nSkills:
+    def test_executive_synthesis_uses_skill_rules_not_generic_output(self) -> None:
+        query = "[EXECUTIVE-SYNTHESIS SKILL]\nSynthesize today's market news."
+
+        result = build_prompt(None, query)
+
+        assert "N8N SKILL OUTPUT RULES" in result
+        assert "Never answer NO_REPLY" in result
+        assert "Valuation Take" not in result
+        assert query in result
+
+    def test_ticker_watch_uses_json_instruction_not_generic_output(self) -> None:
+        query = "[TICKER-WATCH SKILL]\nClassify each ticker as NEW or SKIP."
+
+        result = build_prompt(None, query)
+
+        assert "return only the JSON object" in result
+        assert "Key Strengths" not in result
+        assert query in result
+
+
 class TestBuildPromptWithPartialMacroContext:
     def test_none_fields_rendered_as_na(self) -> None:
         ctx = MacroContext(policy_rate=4.0)

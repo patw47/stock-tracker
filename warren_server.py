@@ -156,6 +156,8 @@ def extract_inner(stdout):
         for key in ("response", "content", "message", "text", "output"):
             if key in outer and isinstance(outer[key], str):
                 return outer[key]
+        if result_obj:
+            return "Aucune réponse textuelle produite par Warren (NO_REPLY)."
     return stdout
 
 

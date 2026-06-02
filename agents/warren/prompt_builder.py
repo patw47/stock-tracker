@@ -76,6 +76,16 @@ explicit margin of safety or lack thereof.
 Rules: no sections beyond the five above; no filler; if data is insufficient for a section \
 write "Insufficient data — <what is missing>." rather than speculating."""
 
+_N8N_SKILL_OUTPUT_RULES = """\
+=== N8N SKILL OUTPUT RULES ===
+The user query contains a pipeline skill marker. Follow that marker's task-specific \
+format instead of the generic company-analysis output format.
+- For [TICKER-WATCH SKILL], return only the JSON object requested by the query.
+- For [EXECUTIVE-SYNTHESIS SKILL], write the French executive briefing requested by \
+the query.
+- Never answer NO_REPLY. If the input contains no material news, explicitly say so in \
+the requested format."""
+
 
 def _fmt(value: object, suffix: str = "") -> str:
     if value is None:
@@ -167,6 +177,10 @@ def _render_macro(macro: MacroContext) -> str:
     return "\n".join(lines)
 
 
+def _is_n8n_skill_query(query: str) -> bool:
+    return "[TICKER-WATCH SKILL]" in query or "[EXECUTIVE-SYNTHESIS SKILL]" in query
+
+
 def build_prompt(macro_context: MacroContext | None, query: str) -> str:
     """Assemble the full prompt for a Warren LLM call.
 
@@ -175,7 +189,11 @@ def build_prompt(macro_context: MacroContext | None, query: str) -> str:
     included.
     """
     user_section = f"=== USER QUERY ===\n{query}"
-    parts = [_SYSTEM_PERSONA, _OUTPUT_STRUCTURE]
+    parts = [_SYSTEM_PERSONA]
+    if _is_n8n_skill_query(query):
+        parts.append(_N8N_SKILL_OUTPUT_RULES)
+    else:
+        parts.append(_OUTPUT_STRUCTURE)
     if macro_context is not None:
         parts.append(_render_macro(macro_context))
     parts.append(user_section)
