@@ -198,6 +198,39 @@ class TestBuildPromptWithMacroSnapshot:
         result = build_prompt(None, query, macro_snapshot=self._snap())
         assert query in result
 
+    def test_section_emojis_present(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "🌍 MACRO DU JOUR" in result
+        assert "📊 PORTEFEUILLE" in result
+        assert "👀 WATCHLIST" in result
+        assert "⚠️ ALERTES" in result
+
+    def test_section_divider_present(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "────────────────────────" in result
+
+    def test_no_bare_percentage_in_macro_snapshot_section(self) -> None:
+        import re
+
+        snap = MacroSnapshot(
+            fed_stance="hawkish",
+            dollar_signal="USD strengthening",
+            geopolitical_notes="Taiwan tensions",
+            overall_sentiment="risk-off",
+            upcoming_events=[],
+        )
+        result = build_prompt(None, "q", macro_snapshot=snap)
+        macro_start = result.find("=== MACRO DU JOUR ===")
+        macro_end = result.find("=== USER QUERY ===")
+        macro_section = result[macro_start:macro_end] if macro_start != -1 else result
+        assert not re.search(r"\d{2,}%", macro_section), (
+            "Bare percentage found in macro section"
+        )
+
+    def test_signal_first_instruction_present(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "signal" in result.lower() or "FIRST" in result
+
 
 class TestMacroProviderReturnType:
     def test_get_snapshot_returns_macro_context(self) -> None:

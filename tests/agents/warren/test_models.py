@@ -137,3 +137,60 @@ class TestMacroSnapshotInstantiation:
     def test_macro_snapshot_requires_all_fields(self) -> None:
         with pytest.raises(ValidationError):
             MacroSnapshot(fed_stance="hawkish")  # type: ignore[call-arg]
+
+    def test_fed_stance_rejects_invalid_value(self) -> None:
+        with pytest.raises(ValidationError):
+            MacroSnapshot(
+                fed_stance="very_hawkish",  # type: ignore[arg-type]
+                dollar_signal="USD strong",
+                geopolitical_notes="None",
+                overall_sentiment="neutral",
+                upcoming_events=[],
+            )
+
+    def test_overall_sentiment_rejects_invalid_value(self) -> None:
+        with pytest.raises(ValidationError):
+            MacroSnapshot(
+                fed_stance="neutral",
+                dollar_signal="USD stable",
+                geopolitical_notes="None",
+                overall_sentiment="bullish",  # type: ignore[arg-type]
+                upcoming_events=[],
+            )
+
+    def test_fed_stance_accepts_all_valid_values(self) -> None:
+        for stance in ("hawkish", "dovish", "neutral"):
+            snap = MacroSnapshot(
+                fed_stance=stance,  # type: ignore[arg-type]
+                dollar_signal="USD stable",
+                geopolitical_notes="None",
+                overall_sentiment="neutral",
+                upcoming_events=[],
+            )
+            assert snap.fed_stance == stance
+
+    def test_overall_sentiment_accepts_all_valid_values(self) -> None:
+        for sentiment in ("risk-on", "risk-off", "neutral"):
+            snap = MacroSnapshot(
+                fed_stance="neutral",
+                dollar_signal="USD stable",
+                geopolitical_notes="None",
+                overall_sentiment=sentiment,  # type: ignore[arg-type]
+                upcoming_events=[],
+            )
+            assert snap.overall_sentiment == sentiment
+
+
+class TestUpcomingEvent:
+    def test_upcoming_event_requires_name(self) -> None:
+        with pytest.raises(ValidationError):
+            UpcomingEvent(date="2026-06-18")  # type: ignore[call-arg]
+
+    def test_upcoming_event_requires_date(self) -> None:
+        with pytest.raises(ValidationError):
+            UpcomingEvent(name="Fed Decision")  # type: ignore[call-arg]
+
+    def test_upcoming_event_accepts_both_fields(self) -> None:
+        event = UpcomingEvent(name="Fed Decision", date="2026-06-18")
+        assert event.name == "Fed Decision"
+        assert event.date == "2026-06-18"
