@@ -98,6 +98,16 @@ Output rules:
 4. Keep justifications to one sentence maximum.
 5. Alerts section must flag any ticker symbol that looks incorrect or ambiguous."""
 
+_N8N_SKILL_OUTPUT_RULES = """\
+=== N8N SKILL OUTPUT RULES ===
+The user query contains a pipeline skill marker. Follow that marker's task-specific \
+format instead of the generic company-analysis output format.
+- For [TICKER-WATCH SKILL], return only the JSON object requested by the query.
+- For [EXECUTIVE-SYNTHESIS SKILL], write the French executive briefing requested by \
+the query.
+- Never answer NO_REPLY. If the input contains no material news, explicitly say so in \
+the requested format."""
+
 
 def _fmt(value: object, suffix: str = "") -> str:
     if value is None:
