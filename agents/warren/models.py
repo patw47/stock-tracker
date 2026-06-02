@@ -50,6 +50,30 @@ class MacroContext(BaseModel):
         default=None,
         description="2-Year Treasury constant maturity yield, percent.",
     )
+    hy_spread: float | None = Field(
+        default=None,
+        description="ICE BofA US High Yield Option-Adjusted Spread, percent (FRED: BAMLH0A0HYM2).",
+    )
+    ig_spread: float | None = Field(
+        default=None,
+        description="ICE BofA US Corporate IG Option-Adjusted Spread, percent (FRED: BAMLC0A0CM).",
+    )
+    dollar_index: float | None = Field(
+        default=None,
+        description="Trade-weighted broad nominal US dollar index (FRED: DTWEXBGS).",
+    )
+    unemployment_rate: float | None = Field(
+        default=None,
+        description="US civilian unemployment rate, percent (FRED: UNRATE).",
+    )
+    spx_level: float | None = Field(
+        default=None,
+        description="S&P 500 index closing level (FRED: SP500).",
+    )
+    spx_pct_change_1m: float | None = Field(
+        default=None,
+        description="S&P 500 approximate 1-month percent change (last ~22 trading days).",
+    )
     market_regime: str | None = Field(
         default=None,
         description="Qualitative market regime: 'risk_on' | 'neutral' | 'risk_off' | 'crisis' | 'unknown'.",
