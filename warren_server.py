@@ -4,26 +4,43 @@ Warren HTTP bridge for n8n.
 POST /filter     -- ticker-watch: classify tickers as NEW vs SKIP
 POST /synthesize -- executive-synthesis: markdown briefing + write memory
 """
+from __future__ import annotations
+
+from collections.abc import Awaitable
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import subprocess, json, os, time, datetime
+import asyncio
+import datetime
+import inspect
+import json
+import logging
+import os
+import subprocess
+import time
+from typing import cast
+
+try:
+    from agents.warren.macro_provider import MacroProvider
+except ImportError:
+    MacroProvider = None
 
 try:
     from agents.warren.macro_provider import get_snapshot
-    from agents.warren.models import MacroSnapshot
+except ImportError:
+    get_snapshot = None
+
+try:
+    from agents.warren.models import MacroContext
     from agents.warren.prompt_builder import build_prompt
 except ImportError:
-    from agents.warren.models import MacroContext as MacroSnapshot
+    from agents.warren.models import MacroContext
 
-    def get_snapshot() -> MacroSnapshot:
-        """Return an empty macro snapshot when the provider hook is unavailable."""
-        return MacroSnapshot()
-
-    def build_prompt(snapshot: MacroSnapshot, query: str) -> str:
+    def build_prompt(macro_context: MacroContext | None, query: str) -> str:
         """Preserve existing prompt text when the prompt builder is unavailable."""
-        _ = snapshot
+        _ = macro_context
         return query
 
 
+logger = logging.getLogger(__name__)
 OPENCLAW_CONFIG = "/home/warren/.openclaw/openclaw.json"
 WORKSPACE = "/home/warren/.openclaw/workspace-warren"
 MEMORY_DIR = os.path.join(WORKSPACE, "memory", "tickers")
@@ -66,13 +83,39 @@ def call_warren(message, tag):
     return r.stdout.strip()
 
 
-def build_warren_prompt(query: str) -> str:
-    """Build Warren prompt with macro context, falling back to an empty snapshot."""
+def _resolve_macro_result(
+    result: MacroContext | Awaitable[MacroContext | None] | None,
+) -> MacroContext | None:
+    """Resolve sync or async macro-provider results."""
+    if inspect.isawaitable(result):
+        return asyncio.run(cast(Awaitable[MacroContext | None], result))
+    return result
+
+
+def fetch_macro_context() -> MacroContext | None:
+    """Return macro context for Warren while keeping the HTTP bridge available."""
     try:
-        snapshot = get_snapshot()
-    except Exception:
-        snapshot = MacroSnapshot()
-    return build_prompt(snapshot, query)
+        if MacroProvider is not None:
+            provider = MacroProvider()
+            if callable(provider):
+                return _resolve_macro_result(provider())
+            if hasattr(provider, "fetch"):
+                return _resolve_macro_result(provider.fetch())
+            logger.warning("MacroProvider is not callable and has no fetch method")
+            return None
+        if get_snapshot is not None:
+            return get_snapshot()
+        logger.warning("No macro provider hook is available")
+        return None
+    except Exception as exc:
+        logger.warning("Failed to fetch macro context: %s", exc)
+        return None
+
+
+def build_warren_prompt(query: str) -> str:
+    """Build Warren prompt with macro context when available."""
+    macro_context = fetch_macro_context()
+    return build_prompt(macro_context, query)
 
 
 def extract_inner(stdout):
