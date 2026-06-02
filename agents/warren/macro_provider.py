@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 
 import requests
 
-from agents.warren.models import MacroContext
+try:
+    import anthropic as anthropic
+except ImportError:  # optional at import time; patched in tests
+    anthropic = None  # type: ignore[assignment]
+
+from agents.warren.models import MacroContext, MacroSnapshot, UpcomingEvent
 
 logger = logging.getLogger(__name__)
 
@@ -174,3 +181,92 @@ def get_snapshot() -> MacroContext:
         market_regime=regime,
         as_of=datetime.now(tz=timezone.utc),
     )
+
+
+_PERCENT_RE = re.compile(r'\d+(\.\d+)?%')
+_MACRO_SEARCH_QUERY = "markets macro today Fed inflation geopolitics 2026"
+
+_EXTRACT_PROMPT = """Based on the macro context above, return a JSON object with exactly these fields:
+{
+  "fed_stance": "hawkish" or "dovish" or "neutral",
+  "dollar_signal": "short qualitative description of USD direction, no percentages",
+  "geopolitical_notes": "summary of active geopolitical risks, no percentages",
+  "overall_sentiment": "risk-on" or "risk-off" or "neutral",
+  "upcoming_events": [{"name": "event name", "date": "YYYY-MM-DD or descriptive date"}]
+}
+Return ONLY valid JSON, no other text."""
+
+
+def _sanitize_qualitative(text: str) -> str:
+    """Strip bare percentage strings from a qualitative field."""
+    return _PERCENT_RE.sub("", text).strip()
+
+
+def _search_macro_raw() -> str:
+    """Perform web search for macro context using anthropic web_search tool."""
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Search for: {_MACRO_SEARCH_QUERY}\n\n"
+                "Summarize the current macro environment: Fed stance, dollar direction, "
+                "geopolitical risks, and upcoming market-moving events."
+            ),
+        }],
+    )
+    return "\n".join(
+        block.text for block in response.content if hasattr(block, "text") and block.text
+    )
+
+
+def _extract_snapshot_from_text(context_text: str) -> MacroSnapshot:
+    """Call LLM to extract structured MacroSnapshot fields from context text."""
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=512,
+        messages=[{
+            "role": "user",
+            "content": f"Macro context:\n{context_text}\n\n{_EXTRACT_PROMPT}",
+        }],
+    )
+    raw_text = response.content[0].text if response.content else "{}"
+    m = re.search(r'\{.*\}', raw_text, re.DOTALL)
+    raw: dict = json.loads(m.group() if m else raw_text)
+
+    dollar_signal: str = raw.get("dollar_signal") or "dollar direction uncertain"
+    geopolitical_notes: str = raw.get("geopolitical_notes") or "no major geopolitical disruptions noted"
+
+    if _PERCENT_RE.search(dollar_signal):
+        dollar_signal = _sanitize_qualitative(dollar_signal) or "dollar direction uncertain"
+    if _PERCENT_RE.search(geopolitical_notes):
+        geopolitical_notes = _sanitize_qualitative(geopolitical_notes) or "geopolitical tensions persist"
+
+    upcoming_events = [
+        UpcomingEvent(name=e["name"], date=e["date"])
+        for e in raw.get("upcoming_events", [])
+        if isinstance(e, dict) and "name" in e and "date" in e
+    ]
+
+    return MacroSnapshot(
+        fed_stance=raw.get("fed_stance", "neutral"),
+        dollar_signal=dollar_signal,
+        geopolitical_notes=geopolitical_notes,
+        overall_sentiment=raw.get("overall_sentiment", "neutral"),
+        upcoming_events=upcoming_events,
+    )
+
+
+async def fetch_macro_snapshot() -> MacroSnapshot:
+    """Fetch qualitative macro snapshot via web search and LLM extraction.
+
+    Searches for current macro conditions, then uses an LLM to extract
+    directional signals into a MacroSnapshot. Sanitizes dollar_signal and
+    geopolitical_notes to remove bare percentage values.
+    """
+    context_text = _search_macro_raw()
+    return _extract_snapshot_from_text(context_text)
