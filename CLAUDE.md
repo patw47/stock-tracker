@@ -126,3 +126,42 @@ deploy status message still arrives.
 (self-hosted runner). Runner uses the repo-scoped `GITHUB_TOKEN` for the git fetch.
 
 ---
+
+## Watchlist & Portfolio Management via Telegram
+
+Users manage their watched and held tickers directly from Telegram. Warren agent exposes two commands to add or remove stocks from the tracking lists.
+
+**Commands**
+
+- `/modifywatchlist` — Opens an inline button menu to add or remove tickers from the watchlist
+- `/modifyportfolio` — Opens an inline button menu to add or remove tickers from the portfolio
+
+**Conversation flow**
+
+1. User sends `/modifywatchlist` or `/modifyportfolio`
+2. Warren responds with two inline buttons: `➕ Add` and `➖ Remove`
+3. User selects an action (add or remove)
+4. Warren prompts `Type the ticker symbol (uppercase):` and waits for plaintext input
+5. User sends ticker (e.g. `AAPL`)
+6. Warren confirms: `✅ AAPL added to watchlist` or `✅ AAPL removed from watchlist`
+
+Lists are immediately persisted after each action.
+
+**Storage**
+
+Watchlist and portfolio are stored as JSON files in `agents/warren/data/`:
+
+- `watchlist.json` — array of uppercase ticker strings (e.g. `["AAPL", "MSFT", "GOOG"]`)
+- `portfolio.json` — array of uppercase ticker strings
+
+Each file contains only valid tickers that have been added and not yet removed. Files are overwritten on every modification to ensure consistency.
+
+**Extending**
+
+To add a new ticker list type:
+
+1. Create a handler function in `agents/warren/telegram_list_handlers.py` following the `CommandHandler` pattern
+2. Register the handler in `warren_server.py` by adding it to the bot command set in `set_my_commands()`
+3. Store the list as a JSON file in `agents/warren/data/{name}.json`
+
+---

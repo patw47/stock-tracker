@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import subprocess
+import threading
 import time
 from typing import cast
 
@@ -329,5 +330,29 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     os.makedirs(MEMORY_DIR, exist_ok=True)
+
+    http_server = HTTPServer(("127.0.0.1", 18795), Handler)
+    t = threading.Thread(target=http_server.serve_forever, daemon=True)
+    t.start()
     print("Warren HTTP server listening on 127.0.0.1:18795")
-    HTTPServer(("127.0.0.1", 18795), Handler).serve_forever()
+
+    token = os.environ.get("TELEGRAM_TOKEN")
+    if token:
+        from telegram import BotCommand
+        from telegram.ext import Application
+        from agents.warren.telegram_list_handlers import register_list_handlers
+
+        async def post_init(application: Application) -> None:
+            """Register bot commands on startup."""
+            await application.bot.set_my_commands([
+                BotCommand('modifywatchlist', '📋 Modify your Watchlist'),
+                BotCommand('modifyportfolio', '💼 Modify your Portfolio'),
+            ])
+
+        application = Application.builder().token(token).post_init(post_init).build()
+        register_list_handlers(application)
+        print("Warren Telegram bot starting...")
+        application.run_polling()
+    else:
+        logger.warning("TELEGRAM_TOKEN not set — Telegram bot disabled, HTTP server only")
+        t.join()
