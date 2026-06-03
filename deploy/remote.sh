@@ -52,6 +52,7 @@ log "execute workflow $WID (run de validation, service n8n arrêté)"
 sudo -u warren env \
   N8N_USER_FOLDER="$N8N_DATA" \
   N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false \
+  NODE_FUNCTION_ALLOW_BUILTIN=fs \
   n8n execute --id="$WID"
 trigger_rc=$?
 if [ "$trigger_rc" -eq 0 ]; then trigger="ok"; else trigger="fail"; fi
