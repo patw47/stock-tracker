@@ -1,0 +1,7 @@
+{
+  "_schema": {
+    "_comment": "Each entry: {\"symbol\": str, \"reason\": str, \"timestamp\": ISO8601}",
+    "example": {"symbol": "XYZ", "reason": "API returns no data / name mismatch", "timestamp": "2026-01-01T00:00:00Z"}
+  },
+  "quarantined": []
+}
