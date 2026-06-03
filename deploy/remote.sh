@@ -18,6 +18,11 @@ log() { echo "[deploy] $*"; }
 # id du workflow canonique, lu depuis workflow.json (évite toute dérive).
 WID=$(python3 -c "import json;print(json.load(open('$REPO/workflow.json'))['id'])")
 
+# Seed runtime ticker lists on a fresh install (gitignored; edited live via Telegram).
+for L in watchlist portfolio; do
+  [ -f "$REPO/$L.json" ] || cp "$REPO/$L.example.json" "$REPO/$L.json"
+done
+
 # 0. Dépendances Python du bridge Warren (warren_server.py utilise pydantic + requests).
 #    Installées dans le python système (/usr/bin/python3, celui du service warren-server).
 if [ -f "$REPO/requirements.txt" ]; then
