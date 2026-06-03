@@ -26,10 +26,10 @@ jobs:
         run: |
           echo "Validating workflow.json..."
           python -m json.tool workflow.json > /dev/null
-          echo "Validating portfolio.json..."
-          python -m json.tool portfolio.json > /dev/null
-          echo "Validating watchlist.json..."
-          python -m json.tool watchlist.json > /dev/null
+          echo "Validating portfolio.example.json..."
+          python -m json.tool portfolio.example.json > /dev/null
+          echo "Validating watchlist.example.json..."
+          python -m json.tool watchlist.example.json > /dev/null
           echo "All JSON files valid."
 
       - name: Sync QA result to Notion
