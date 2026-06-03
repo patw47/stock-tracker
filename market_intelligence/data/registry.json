@@ -1,0 +1,38 @@
+{
+  "portfolio_tickers": [
+    {"symbol": "MMED", "api_symbol": "MMED", "expected_name": "Mind Medicine"},
+    {"symbol": "PLX",  "api_symbol": "PLX",  "expected_name": "Praxis Precision Medicine"},
+    {"symbol": "ALTD", "api_symbol": "ALTD", "expected_name": "Altitude Acquisition"},
+    {"symbol": "GRO",  "api_symbol": "GRO",  "expected_name": "Greenfire Resources"},
+    {"symbol": "NUAI", "api_symbol": "NUAI", "expected_name": "NuScale Power"}
+  ],
+  "_TODO": {
+    "_comment": "11 remaining portfolio slots — fill from portfolio.json / watchlist.json and move to portfolio_tickers",
+    "slots": [
+      {"symbol": "BBAI", "api_symbol": "BBAI", "expected_name": "BigBear.ai"},
+      {"symbol": "HIMS", "api_symbol": "HIMS", "expected_name": "Hims & Hers Health"},
+      {"symbol": "PRCH", "api_symbol": "PRCH", "expected_name": "Porch Group"},
+      {"symbol": "RGTI", "api_symbol": "RGTI", "expected_name": "Rigetti Computing"},
+      {"symbol": "VUZI", "api_symbol": "VUZI", "expected_name": "Vuzix"},
+      {"symbol": "XYL",  "api_symbol": "XYL",  "expected_name": "Xylem"},
+      {"symbol": "SMR",  "api_symbol": "SMR",  "expected_name": "NuScale Power"},
+      {"symbol": "OKLO", "api_symbol": "OKLO", "expected_name": "Oklo Inc."},
+      {"symbol": "BLNK", "api_symbol": "BLNK", "expected_name": "Blink Charging"},
+      {"symbol": "STIM", "api_symbol": "STIM", "expected_name": "Neuronetics"},
+      {"symbol": "HYLN", "api_symbol": "HYLN", "expected_name": "Hyliion Holdings"}
+    ]
+  },
+  "macro_tickers": [
+    {"symbol": "IWM",  "api_symbol": "IWM",      "expected_name": "iShares Russell 2000 ETF"},
+    {"symbol": "^VIX", "api_symbol": "^VIX",     "expected_name": "CBOE Volatility Index"},
+    {"symbol": "^TNX", "api_symbol": "^TNX",     "expected_name": "CBOE 10 Year Treasury Note"},
+    {"symbol": "DXY",  "api_symbol": "DX-Y.NYB", "expected_name": "US Dollar Index"},
+    {"symbol": "OIL",  "api_symbol": "CL=F",     "expected_name": "Crude Oil Futures"}
+  ],
+  "alias_map": {
+    "DXY": "DX-Y.NYB",
+    "OIL": "CL=F",
+    "^VIX": "^VIX",
+    "^TNX": "^TNX"
+  }
+}
