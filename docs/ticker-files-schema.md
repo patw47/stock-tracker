@@ -29,3 +29,9 @@ const tickers = [
 ```
 
 Result: array of 16 strings (8 portfolio + 8 watchlist).
+
+## n8n node update
+
+Node `Read Tickers` (`node-read-watchlist`) updated to read from files at runtime.
+Absolute host paths: `/opt/apps/stock-tracker/portfolio.json` and `/opt/apps/stock-tracker/watchlist.json`.
+Output shape unchanged: `{ symbol, sector, status }` per item (status derived from source file).
