@@ -129,39 +129,39 @@ deploy status message still arrives.
 
 ## Watchlist & Portfolio Management via Telegram
 
-Users manage their watched and held tickers directly from Telegram. Warren agent exposes two commands to add or remove stocks from the tracking lists.
+Add or remove tickers from the **Watchlist** / **Portfolio** directly in the Telegram
+conversation with Warren, via inline buttons. The lists are read every morning by the
+n8n "Read Tickers" node.
 
-**Commands**
+**Architecture** — the Telegram bot is owned by the OpenClaw gateway (single `getUpdates`
+poller), so this is implemented as **OpenClaw workspace skills**, not a separate bot.
+`skills/modifywatchlist` and `skills/modifyportfolio` (SKILL.md with `name` + `description`
+frontmatter) appear as `/modifywatchlist` and `/modifyportfolio` in the Telegram command
+menu. All Telegram I/O (inline keyboards) goes through `agents/warren/manage_tickers.py`
+(direct Bot API). Stateless: OpenClaw forwards each button press to the agent as a
+`wl:`/`pf:` message, which the skill routes back to `manage_tickers.py --handle-callback`.
 
-- `/modifywatchlist` — Opens an inline button menu to add or remove tickers from the watchlist
-- `/modifyportfolio` — Opens an inline button menu to add or remove tickers from the portfolio
+**Flow**
 
-**Conversation flow**
+1. `/modifywatchlist` (or `/modifyportfolio`) → "What would you like to do?" with
+   **[➕ Add a ticker] [➖ Remove a ticker]**.
+2. **Add** → prompts for symbol(s); the user types e.g. `NVDA, MSFT` → each is appended
+   with its `added` date → ✅ confirmation listing the updated tickers.
+3. **Remove** → current tickers shown as toggle buttons (multi-select) + **✅ Validate /
+   ⛔ Cancel** → on Validate the selected tickers are removed → ✅ confirmation.
 
-1. User sends `/modifywatchlist` or `/modifyportfolio`
-2. Warren responds with two inline buttons: `➕ Add` and `➖ Remove`
-3. User selects an action (add or remove)
-4. Warren prompts `Type the ticker symbol (uppercase):` and waits for plaintext input
-5. User sends ticker (e.g. `AAPL`)
-6. Warren confirms: `✅ AAPL added to watchlist` or `✅ AAPL removed from watchlist`
+**Storage** — `watchlist.json` / `portfolio.json` at the repo root (the files the workflow
+reads), shape `{"tickers": [{"symbol", "name?", "sector?", "added?"}], "updated_at"}`. They
+are **gitignored** (runtime state, edited via Telegram) and seeded from `*.example.json`;
+`deploy/remote.sh` recreates them on a fresh install. The in-progress remove selection is
+held in `/home/warren/.openclaw/workspace-warren/.ticker-state.db` (SQLite).
 
-Lists are immediately persisted after each action.
+**Bot token / chat** — read from `openclaw.json`
+(`channels.telegram.accounts.default.botToken`, `commands.ownerAllowFrom[0]`); no secrets in
+the repo.
 
-**Storage**
+**Live location** — skills run from `/home/warren/.openclaw/workspace-warren/skills/`;
+resync from the repo `skills/` copy after editing, then `systemctl restart openclaw-warren`.
 
-Watchlist and portfolio are stored as JSON files in `agents/warren/data/`:
-
-- `watchlist.json` — array of uppercase ticker strings (e.g. `["AAPL", "MSFT", "GOOG"]`)
-- `portfolio.json` — array of uppercase ticker strings
-
-Each file contains only valid tickers that have been added and not yet removed. Files are overwritten on every modification to ensure consistency.
-
-**Extending**
-
-To add a new ticker list type:
-
-1. Create a handler function in `agents/warren/telegram_list_handlers.py` following the `CommandHandler` pattern
-2. Register the handler in `warren_server.py` by adding it to the bot command set in `set_my_commands()`
-3. Store the list as a JSON file in `agents/warren/data/{name}.json`
-
----
+**Extending** — add a SKILL.md (with `name` + `description` frontmatter) under `skills/`,
+give it a callback prefix, and route it through `manage_tickers.py`.
