@@ -1,0 +1,38 @@
+## Watchlist & Portfolio Management via Telegram
+
+Add or remove tickers from the **Watchlist** / **Portfolio** directly in the Telegram
+conversation with Warren, via inline buttons. The lists are read every morning by the
+n8n "Read Tickers" node.
+
+**Architecture** — the Telegram bot is owned by the OpenClaw gateway (single `getUpdates`
+poller), so this is implemented as **OpenClaw workspace skills**, not a separate bot.
+`skills/modifywatchlist` and `skills/modifyportfolio` (SKILL.md with `name` + `description`
+frontmatter) appear as `/modifywatchlist` and `/modifyportfolio` in the Telegram command
+menu. All Telegram I/O (inline keyboards) goes through `agents/warren/manage_tickers.py`
+(direct Bot API). Stateless: OpenClaw forwards each button press to the agent as a
+`wl:`/`pf:` message, which the skill routes back to `manage_tickers.py --handle-callback`.
+
+**Flow**
+
+1. `/modifywatchlist` (or `/modifyportfolio`) → "What would you like to do?" with
+   **[➕ Add a ticker] [➖ Remove a ticker]**.
+2. **Add** → prompts for symbol(s); the user types e.g. `NVDA, MSFT` → each is appended
+   with its `added` date → ✅ confirmation listing the updated tickers.
+3. **Remove** → current tickers shown as toggle buttons (multi-select) + **✅ Validate /
+   ⛔ Cancel** → on Validate the selected tickers are removed → ✅ confirmation.
+
+**Storage** — `watchlist.json` / `portfolio.json` at the repo root (the files the workflow
+reads), shape `{"tickers": [{"symbol", "name?", "sector?", "added?"}], "updated_at"}`. They
+are **gitignored** (runtime state, edited via Telegram) and seeded from `*.example.json`;
+`deploy/remote.sh` recreates them on a fresh install. The in-progress remove selection is
+held in `/home/warren/.openclaw/workspace-warren/.ticker-state.db` (SQLite).
+
+**Bot token / chat** — read from `openclaw.json`
+(`channels.telegram.accounts.default.botToken`, `commands.ownerAllowFrom[0]`); no secrets in
+the repo.
+
+**Live location** — skills run from `/home/warren/.openclaw/workspace-warren/skills/`;
+resync from the repo `skills/` copy after editing, then `systemctl restart openclaw-warren`.
+
+**Extending** — add a SKILL.md (with `name` + `description` frontmatter) under `skills/`,
+give it a callback prefix, and route it through `manage_tickers.py`.
