@@ -1,3 +1,8 @@
 # Dépendances Python du bridge Warren (warren_server.py) et du package agents/warren.
 pydantic>=2,<3
 requests>=2.31
+
+# Market Intelligence (Couche B — EOD technical analysis)
+pandas>=2
+yfinance>=0.2.40
+pyarrow>=15

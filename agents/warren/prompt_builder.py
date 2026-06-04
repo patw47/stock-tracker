@@ -217,6 +217,10 @@ def _render_macro(macro: MacroContext) -> str:
     return "\n".join(lines)
 
 
+def _is_n8n_skill_query(query: str) -> bool:
+    return "[TICKER-WATCH SKILL]" in query or "[EXECUTIVE-SYNTHESIS SKILL]" in query
+
+
 def build_prompt(
     macro_context: MacroContext | None,
     query: str,
