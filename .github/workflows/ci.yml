@@ -32,6 +32,16 @@ jobs:
           python -m json.tool watchlist.json > /dev/null
           echo "All JSON files valid."
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run tests
+        run: pytest -q
+
       - name: Sync QA result to Notion
         if: always()
         env:

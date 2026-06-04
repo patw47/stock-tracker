@@ -1,0 +1,33 @@
+{
+  "portfolio_tickers": [
+    {"symbol": "BBAI", "api_symbol": "BBAI", "expected_name": "BigBear.ai"},
+    {"symbol": "HIMS", "api_symbol": "HIMS", "expected_name": "Hims & Hers Health"},
+    {"symbol": "MMED", "api_symbol": "MMED", "expected_name": "MiniMed"},
+    {"symbol": "PRCH", "api_symbol": "PRCH", "expected_name": "Porch Group"},
+    {"symbol": "RGTI", "api_symbol": "RGTI", "expected_name": "Rigetti Computing"},
+    {"symbol": "VUZI", "api_symbol": "VUZI", "expected_name": "Vuzix"},
+    {"symbol": "XYL", "api_symbol": "XYL", "expected_name": "Xylem"},
+    {"symbol": "NUAI", "api_symbol": "NUAI", "expected_name": "New Era Energy"},
+    {"symbol": "SMR", "api_symbol": "SMR", "expected_name": "NuScale Power"},
+    {"symbol": "ALTD", "api_symbol": "ALTD", "expected_name": "Altitude"},
+    {"symbol": "OKLO", "api_symbol": "OKLO", "expected_name": "Oklo"},
+    {"symbol": "BLNK", "api_symbol": "BLNK", "expected_name": "Blink Charging"},
+    {"symbol": "GRO", "api_symbol": "GRO", "expected_name": "Brazil Potash"},
+    {"symbol": "STIM", "api_symbol": "STIM", "expected_name": "Neuronetics"},
+    {"symbol": "PLX", "api_symbol": "PLX", "expected_name": "Protalix"},
+    {"symbol": "HYLN", "api_symbol": "HYLN", "expected_name": "Hyliion"}
+  ],
+  "macro_tickers": [
+    {"symbol": "IWM", "api_symbol": "IWM", "expected_name": "iShares Russell 2000"},
+    {"symbol": "^VIX", "api_symbol": "^VIX", "expected_name": "CBOE Volatility Index"},
+    {"symbol": "^TNX", "api_symbol": "^TNX", "expected_name": "CBOE Interest Rate 10"},
+    {"symbol": "DXY", "api_symbol": "DX-Y.NYB", "expected_name": "US Dollar"},
+    {"symbol": "OIL", "api_symbol": "CL=F", "expected_name": "Crude Oil"}
+  ],
+  "alias_map": {
+    "DXY": "DX-Y.NYB",
+    "OIL": "CL=F",
+    "^VIX": "^VIX",
+    "^TNX": "^TNX"
+  }
+}
