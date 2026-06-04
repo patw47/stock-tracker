@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agents.warren.models import MacroContext
+from agents.warren.models import MacroContext, MacroSnapshot, UpcomingEvent
 from agents.warren.prompt_builder import build_prompt
 
 
@@ -128,6 +128,129 @@ class TestBuildPromptWithPartialMacroContext:
         ctx = MacroContext(policy_rate=5.0, sector_flows=None)
         result = build_prompt(ctx, "q")
         assert "N/A" in result
+
+
+class TestBuildPromptWithMacroSnapshot:
+    def _snap(self) -> MacroSnapshot:
+        return MacroSnapshot(
+            fed_stance="hawkish",
+            dollar_signal="USD strengthening on rate expectations",
+            geopolitical_notes="Taiwan tensions remain elevated",
+            overall_sentiment="risk-on",
+            upcoming_events=[
+                UpcomingEvent(name="Fed Decision", date="2026-06-18"),
+                UpcomingEvent(name="CPI Release", date="2026-06-12"),
+            ],
+        )
+
+    def test_returns_non_empty_string(self) -> None:
+        result = build_prompt(None, "analyse tickers", macro_snapshot=self._snap())
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_contains_macro_du_jour_section(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "MACRO DU JOUR" in result
+
+    def test_contains_fed_stance(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "hawkish" in result
+
+    def test_contains_dollar_signal(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "USD strengthening" in result
+
+    def test_contains_geopolitical_notes(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "Taiwan" in result
+
+    def test_contains_overall_sentiment(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "risk-on" in result
+
+    def test_contains_upcoming_events(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "Fed Decision" in result
+        assert "CPI Release" in result
+
+    def test_briefing_date_rendered(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap(), briefing_date="2026-06-02")
+        assert "2026-06-02" in result
+
+    def test_no_macro_context_section_when_snapshot_provided(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "MACRO CONTEXT" not in result
+
+    def test_snapshot_takes_priority_over_macro_context(self) -> None:
+        ctx = MacroContext(policy_rate=5.25)
+        result = build_prompt(ctx, "q", macro_snapshot=self._snap())
+        assert "MACRO DU JOUR" in result
+        assert "hawkish" in result
+
+    def test_no_heading_markers_instruction_present(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "NEVER use #" in result or "# markdown" in result.lower()
+
+    def test_output_structure_contains_portfolio_section(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "PORTEFEUILLE" in result
+
+    def test_output_structure_contains_watchlist_section(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "WATCHLIST" in result
+
+    def test_output_structure_contains_alertes_section(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "ALERTES" in result
+
+    def test_empty_upcoming_events_renders_aucun(self) -> None:
+        snap = MacroSnapshot(
+            fed_stance="neutral",
+            dollar_signal="USD stable",
+            geopolitical_notes="No major threats",
+            overall_sentiment="neutral",
+            upcoming_events=[],
+        )
+        result = build_prompt(None, "q", macro_snapshot=snap)
+        assert "Aucun" in result
+
+    def test_query_still_included(self) -> None:
+        query = "Évaluer AAPL et MSFT"
+        result = build_prompt(None, query, macro_snapshot=self._snap())
+        assert query in result
+
+    def test_section_emojis_present(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "🌍 MACRO DU JOUR" in result
+        assert "📊 PORTEFEUILLE" in result
+        assert "👀 WATCHLIST" in result
+        assert "⚠️ ALERTES" in result
+
+    def test_section_divider_present(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "────────────────────────" in result
+
+    def test_no_bare_percentage_in_macro_snapshot_section(self) -> None:
+        import re
+
+        snap = MacroSnapshot(
+            fed_stance="hawkish",
+            dollar_signal="USD strengthening",
+            geopolitical_notes="Taiwan tensions",
+            overall_sentiment="risk-off",
+            upcoming_events=[],
+        )
+        result = build_prompt(None, "q", macro_snapshot=snap)
+        macro_start = result.find("=== MACRO DU JOUR ===")
+        macro_end = result.find("=== USER QUERY ===")
+        macro_section = result[macro_start:macro_end] if macro_start != -1 else result
+        assert not re.search(r"\d{2,}%", macro_section), (
+            "Bare percentage found in macro section"
+        )
+
+    def test_signal_first_instruction_present(self) -> None:
+        result = build_prompt(None, "q", macro_snapshot=self._snap())
+        assert "signal" in result.lower() or "FIRST" in result
 
 
 class TestMacroProviderReturnType:

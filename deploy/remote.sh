@@ -18,6 +18,11 @@ log() { echo "[deploy] $*"; }
 # id du workflow canonique, lu depuis workflow.json (évite toute dérive).
 WID=$(python3 -c "import json;print(json.load(open('$REPO/workflow.json'))['id'])")
 
+# Seed runtime ticker lists on a fresh install (gitignored; edited live via Telegram).
+for L in watchlist portfolio; do
+  [ -f "$REPO/$L.json" ] || cp "$REPO/$L.example.json" "$REPO/$L.json"
+done
+
 # 0. Dépendances Python du bridge Warren (warren_server.py utilise pydantic + requests).
 #    Installées dans le python système (/usr/bin/python3, celui du service warren-server).
 if [ -f "$REPO/requirements.txt" ]; then
@@ -52,6 +57,7 @@ log "execute workflow $WID (run de validation, service n8n arrêté)"
 sudo -u warren env \
   N8N_USER_FOLDER="$N8N_DATA" \
   N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false \
+  NODE_FUNCTION_ALLOW_BUILTIN=fs \
   n8n execute --id="$WID"
 trigger_rc=$?
 if [ "$trigger_rc" -eq 0 ]; then trigger="ok"; else trigger="fail"; fi

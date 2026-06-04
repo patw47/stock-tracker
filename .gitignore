@@ -19,3 +19,8 @@ Thumbs.db
 # Python bytecode (was leaking into agent commits → merge conflicts)
 __pycache__/
 *.py[cod]
+
+# Runtime ticker lists — edited live via Telegram (/modifywatchlist, /modifyportfolio).
+# Untracked so `git reset --hard` on deploy keeps user edits. Seeded from *.example.json.
+watchlist.json
+portfolio.json
