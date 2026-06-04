@@ -231,7 +231,12 @@ def build_prompt(
     New callers should prefer macro_snapshot + briefing_date; macro_context
     remains supported until warren-orchestration-wiring migrates.
     """
-    parts = [_SYSTEM_PERSONA, _OUTPUT_STRUCTURE]
+    output_rules = (
+        _N8N_SKILL_OUTPUT_RULES
+        if "[TICKER-WATCH SKILL]" in query or "[EXECUTIVE-SYNTHESIS SKILL]" in query
+        else _OUTPUT_STRUCTURE
+    )
+    parts = [_SYSTEM_PERSONA, output_rules]
     if macro_snapshot is not None:
         parts.append(_render_macro_snapshot(macro_snapshot, briefing_date))
     elif macro_context is not None:
