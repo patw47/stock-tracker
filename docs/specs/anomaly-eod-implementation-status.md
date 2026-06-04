@@ -34,9 +34,9 @@ Sprint 0 correction PR:
 | Sprint | Status | Branch/PR | Notes |
 |---|---|---|---|
 | S0 Fondation données & intégrité symboles | Done | PR #19 + PR #20 | Do not rewrite |
-| S1 Signaux d'anomalie | Not started | | Next |
-| S2 Gate bêta | Not started | | |
-| S3 Seuils & alertes candidates | Not started | | |
+| S1 Signaux d'anomalie | Done | | Deterministic EOD anomaly signals |
+| S2 Gate bêta | Done | | Market-model residual with optional sector factor |
+| S3 Seuils & alertes candidates | Done | | Deterministic thresholds, short-history fallback, explicit quality decisions |
 | S4 Short interest / squeeze | Not started | | |
 | S5 Dédup hystérésis | Not started | | |
 | S6 Macro snapshot enrichi | Not started | | |
