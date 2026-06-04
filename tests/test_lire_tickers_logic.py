@@ -176,12 +176,12 @@ class TestReadTickersNode:
         assert [i["json"]["symbol"] for i in items_after] == ["AAPL", "TSLA"]
 
     def test_real_fixture_files_load_without_error(self) -> None:
-        """The actual portfolio.json and watchlist.json in the repo parse correctly."""
-        portfolio_path = REPO_ROOT / "portfolio.json"
-        watchlist_path = REPO_ROOT / "watchlist.json"
+        """The versioned example ticker files in the repo parse correctly."""
+        portfolio_path = REPO_ROOT / "portfolio.example.json"
+        watchlist_path = REPO_ROOT / "watchlist.example.json"
 
-        assert portfolio_path.exists(), "portfolio.json missing from repo root"
-        assert watchlist_path.exists(), "watchlist.json missing from repo root"
+        assert portfolio_path.exists(), "portfolio.example.json missing from repo root"
+        assert watchlist_path.exists(), "watchlist.example.json missing from repo root"
 
         items = _run_node(portfolio_path, watchlist_path)
 
