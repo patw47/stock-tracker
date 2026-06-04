@@ -1,0 +1,30 @@
+{
+  "thresholds": {
+    "calm_residual_z": 2.0,
+    "speculative_residual_z": 2.5,
+    "volume_z": 2.5,
+    "rvol": 2.5,
+    "atr_expansion": 1.5,
+    "short_history_multiplier": 1.25,
+    "short_history_return": 0.08,
+    "breakout_min_window": 60
+  },
+  "classifications": {
+    "BBAI": "speculative",
+    "HIMS": "speculative",
+    "MMED": "calm",
+    "PRCH": "speculative",
+    "RGTI": "speculative",
+    "VUZI": "speculative",
+    "XYL": "calm",
+    "NUAI": "speculative",
+    "SMR": "speculative",
+    "ALTD": "speculative",
+    "OKLO": "speculative",
+    "BLNK": "speculative",
+    "GRO": "speculative",
+    "STIM": "speculative",
+    "PLX": "speculative",
+    "HYLN": "speculative"
+  }
+}
