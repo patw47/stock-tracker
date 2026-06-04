@@ -36,12 +36,12 @@ Use this sentence in every Codex prompt:
 
 ## Current next sprint
 
-TARGET_SPRINT: S1 — Calcul des signaux d'anomalie
+TARGET_SPRINT: S5 — Dédup (machine à états hystérésis)
 
-S1 must not:
+S5 must not:
 - call Warren
 - call Telegram
-- implement beta gate
-- implement dedup
-- implement short interest
+- implement MacroSnapshot
+- rewrite candidate alerts
+- rewrite short interest
 - rewrite registry/fetch/normalization foundation

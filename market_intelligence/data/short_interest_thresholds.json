@@ -1,0 +1,9 @@
+{
+  "thresholds": {
+    "short_percent_float": 0.20,
+    "days_to_cover": 5.0
+  },
+  "unsupported_symbols": [
+    "ALTD"
+  ]
+}

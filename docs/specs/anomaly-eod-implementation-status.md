@@ -37,7 +37,7 @@ Sprint 0 correction PR:
 | S1 Signaux d'anomalie | Done | | Deterministic EOD anomaly signals |
 | S2 Gate bêta | Done | | Market-model residual with optional sector factor |
 | S3 Seuils & alertes candidates | Done | | Deterministic thresholds, short-history fallback, explicit quality decisions |
-| S4 Short interest / squeeze | Not started | | |
+| S4 Short interest / squeeze | Done | | Yahoo context with explicit unknown coverage |
 | S5 Dédup hystérésis | Not started | | |
 | S6 Macro snapshot enrichi | Not started | | |
 | S7 Warren ciblé | Not started | | |
@@ -45,7 +45,9 @@ Sprint 0 correction PR:
 
 ## Last implementation notes
 
-S1 must consume normalized OHLCV from S0.
+S4 is a context-only module and must not alter S3 candidate selection.
+Missing, unsupported, quarantined, or invalid short-interest data produces an
+unknown squeeze flag, never a false flag.
 Do not use legacy n8n ticker list as the technical-analysis source of truth.
 
 ## Known risks
