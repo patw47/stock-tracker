@@ -217,6 +217,10 @@ def _render_macro(macro: MacroContext) -> str:
     return "\n".join(lines)
 
 
+def _is_n8n_skill_query(query: str) -> bool:
+    return "[TICKER-WATCH SKILL]" in query or "[EXECUTIVE-SYNTHESIS SKILL]" in query
+
+
 def build_prompt(
     macro_context: MacroContext | None,
     query: str,
@@ -231,7 +235,8 @@ def build_prompt(
     New callers should prefer macro_snapshot + briefing_date; macro_context
     remains supported until warren-orchestration-wiring migrates.
     """
-    parts = [_SYSTEM_PERSONA, _OUTPUT_STRUCTURE]
+    output_rules = _N8N_SKILL_OUTPUT_RULES if _is_n8n_skill_query(query) else _OUTPUT_STRUCTURE
+    parts = [_SYSTEM_PERSONA, output_rules]
     if macro_snapshot is not None:
         parts.append(_render_macro_snapshot(macro_snapshot, briefing_date))
     elif macro_context is not None:
