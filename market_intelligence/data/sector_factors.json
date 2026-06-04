@@ -1,0 +1,18 @@
+{
+  "market_factor": "IWM",
+  "correlation_threshold": 0.35,
+  "sector_factors": {
+    "SMR": ["NUKZ"],
+    "OKLO": ["NUKZ"],
+    "RGTI": ["QTUM"],
+    "XYL": ["PHO", "FIW"],
+    "GRO": ["MOO"],
+    "MMED": ["IHI", "XLV"],
+    "PLX": ["XBI"],
+    "BBAI": ["BOTZ", "KARS"],
+    "BLNK": ["KARS", "BOTZ"],
+    "HYLN": ["KARS", "BOTZ"]
+  },
+  "single_factor_symbols": ["VUZI", "STIM", "PRCH", "HIMS", "ALTD", "NUAI"],
+  "endogeneity_note": "Some securities are constituents of their sector ETF, but their weights are small; no endogeneity correction is applied."
+}
