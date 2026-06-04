@@ -176,7 +176,7 @@ class TestReadTickersNode:
         assert [i["json"]["symbol"] for i in items_after] == ["AAPL", "TSLA"]
 
     def test_real_fixture_files_load_without_error(self) -> None:
-        """The versioned example ticker files in the repo parse correctly."""
+        """The tracked portfolio and watchlist example files parse correctly."""
         portfolio_path = REPO_ROOT / "portfolio.example.json"
         watchlist_path = REPO_ROOT / "watchlist.example.json"
 
