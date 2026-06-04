@@ -1,0 +1,7 @@
+{
+  "thresholds": {
+    "rearm_z": 1.0,
+    "escalation_z_delta": 1.0,
+    "max_latch_observations": 10
+  }
+}

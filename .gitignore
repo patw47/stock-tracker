@@ -24,3 +24,6 @@ __pycache__/
 # Untracked so `git reset --hard` on deploy keeps user edits. Seeded from *.example.json.
 watchlist.json
 portfolio.json
+
+# Runtime anomaly state
+runtime/
