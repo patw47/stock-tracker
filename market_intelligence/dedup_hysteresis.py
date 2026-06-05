@@ -19,7 +19,6 @@ FireReason = Literal[
     "direction_reversal",
     "new_signal_type",
     "escalation",
-    "max_latch_expired",
 ]
 
 _CONFIG_PATH: Final[Path] = Path(__file__).parent / "data" / "dedup_thresholds.json"
@@ -313,6 +312,25 @@ def _updated_latch_state(
     )
 
 
+def _refreshed_latch_state(
+    candidate: CandidateAlert,
+    previous: TickerDedupState,
+    signal_types: tuple[str, ...],
+) -> TickerDedupState:
+    if candidate.as_of is None or candidate.direction is None:
+        raise DedupInputError(f"Candidate for {candidate.ticker} lacks date or direction")
+    return TickerDedupState(
+        last_observed_as_of=candidate.as_of,
+        last_alert_as_of=previous.last_alert_as_of,
+        latched_since=candidate.as_of,
+        latched=True,
+        direction=candidate.direction,
+        trigger_z_resid=candidate.z_resid,
+        seen_signal_types=signal_types,
+        latch_observations=1,
+    )
+
+
 def _override_reason(
     candidate: CandidateAlert,
     state: TickerDedupState,
@@ -330,8 +348,6 @@ def _override_reason(
         >= abs(state.trigger_z_resid) + config.escalation_z_delta
     ):
         return "escalation"
-    if state.latch_observations + 1 > config.max_latch_observations:
-        return "max_latch_expired"
     return None
 
 
@@ -364,6 +380,29 @@ def _deduplicate_locked(
         if squeeze is not None and squeeze.ticker != ticker:
             raise DedupInputError(f"Short-interest key does not match result ticker: {ticker}")
         if not candidate.eligible:
+            previous = states.get(ticker)
+            if (
+                previous is not None
+                and previous.latched
+                and isinstance(candidate.as_of, str)
+                and candidate.as_of > previous.last_observed_as_of
+            ):
+                try:
+                    date.fromisoformat(candidate.as_of)
+                except ValueError:
+                    continue
+                observations = previous.latch_observations + 1
+                states[ticker] = (
+                    _armed_state(candidate.as_of)
+                    if observations > dedup_config.max_latch_observations
+                    else TickerDedupState(
+                        **{
+                            **asdict(previous),
+                            "last_observed_as_of": candidate.as_of,
+                            "latch_observations": observations,
+                        }
+                    )
+                )
             continue
         if not isinstance(candidate.as_of, str):
             raise DedupInputError(f"Eligible decision for {ticker} lacks an as_of date")
@@ -410,6 +449,10 @@ def _deduplicate_locked(
             continue
 
         signal_types = _effective_signal_types(candidate, squeeze)
+        if observations > dedup_config.max_latch_observations:
+            states[ticker] = _refreshed_latch_state(candidate, previous, signal_types)
+            continue
+
         reason = _override_reason(candidate, previous, signal_types, dedup_config)
         if reason is None:
             states[ticker] = TickerDedupState(
@@ -431,7 +474,7 @@ def _deduplicate_locked(
         )
         states[ticker] = (
             _latched_state(candidate, merged_types)
-            if reason in {"direction_reversal", "max_latch_expired"}
+            if reason == "direction_reversal"
             else _updated_latch_state(candidate, previous, merged_types, observations)
         )
         alerts.append(

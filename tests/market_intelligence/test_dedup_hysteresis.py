@@ -100,6 +100,31 @@ def test_persistent_event_and_same_day_replay_fire_only_once(tmp_path: Path) -> 
     assert state.latch_observations == 2
 
 
+def test_state_file_suppresses_alert_across_fresh_invocations(tmp_path: Path) -> None:
+    path = tmp_path / "dedup.json"
+    first = _candidate()
+
+    assert len(deduplicate_alerts({"TEST": first}, state_path=path)) == 1
+    second = _candidate(as_of="2026-06-02", z_resid=2.6)
+
+    assert deduplicate_alerts({"TEST": second}, state_path=path) == ()
+
+
+def test_same_day_calm_observation_does_not_rearm(tmp_path: Path) -> None:
+    path = tmp_path / "dedup.json"
+    _run(path, _candidate())
+
+    calm_same_day = _candidate(
+        is_candidate=False,
+        direction=None,
+        signal_types=(),
+        z_resid=0.5,
+    )
+
+    assert _run(path, calm_same_day) == ()
+    assert load_dedup_state(path)["TEST"].latched is True
+
+
 def test_valid_calm_day_rearms_then_next_candidate_fires(tmp_path: Path) -> None:
     path = tmp_path / "dedup.json"
     _run(path, _candidate())
@@ -244,7 +269,9 @@ def test_squeeze_never_creates_an_alert_without_s3_candidate(tmp_path: Path) -> 
     assert load_dedup_state(path)["TEST"].seen_signal_types == ()
 
 
-def test_max_latch_valve_refires_on_eleventh_valid_observation(tmp_path: Path) -> None:
+def test_max_latch_valve_refreshes_state_without_refiring_same_event(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "dedup.json"
     config = _config(max_latch_observations=3)
     assert len(_run(path, _candidate(), config=config)) == 1
@@ -252,9 +279,37 @@ def test_max_latch_valve_refires_on_eleventh_valid_observation(tmp_path: Path) -
     assert _run(path, _candidate(as_of="2026-06-03"), config=config) == ()
 
     alerts = _run(path, _candidate(as_of="2026-06-04"), config=config)
+    state = load_dedup_state(path)["TEST"]
 
-    assert len(alerts) == 1
-    assert alerts[0].fire_reason == "max_latch_expired"
+    assert alerts == ()
+    assert state.latched is True
+    assert state.latched_since == "2026-06-04"
+    assert state.last_alert_as_of == "2026-06-01"
+    assert state.trigger_z_resid == pytest.approx(2.5)
+    assert state.latch_observations == 1
+
+
+def test_ineligible_dated_observations_advance_latch_valve(tmp_path: Path) -> None:
+    path = tmp_path / "dedup.json"
+    config = _config(max_latch_observations=2)
+    _run(path, _candidate(), config=config)
+
+    stale = _candidate(
+        as_of="2026-06-02",
+        eligible=False,
+        is_candidate=False,
+        direction=None,
+        signal_types=(),
+        z_resid=None,
+    )
+    assert _run(path, stale, config=config) == ()
+    assert load_dedup_state(path)["TEST"].latch_observations == 2
+
+    missing = replace(stale, as_of="2026-06-03")
+    assert _run(path, missing, config=config) == ()
+    state = load_dedup_state(path)["TEST"]
+    assert state.latched is False
+    assert state.last_observed_as_of == "2026-06-03"
 
 
 def test_fallback_candidate_without_z_latches_until_override_or_valve(
@@ -272,14 +327,13 @@ def test_fallback_candidate_without_z_latches_until_override_or_valve(
     assert load_dedup_state(path)["TEST"].latched is True
 
 
-def test_ineligible_and_out_of_order_decisions_do_not_mutate_state(
+def test_out_of_order_decisions_do_not_mutate_state(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "dedup.json"
     _run(path, _candidate(as_of="2026-06-03"))
     before = path.read_text(encoding="utf-8")
 
-    assert _run(path, _candidate(as_of="2026-06-04", eligible=False)) == ()
     assert _run(path, _candidate(as_of="2026-06-02", z_resid=4.0)) == ()
 
     assert path.read_text(encoding="utf-8") == before
