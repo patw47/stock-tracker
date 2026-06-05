@@ -38,13 +38,17 @@ Sprint 0 correction PR:
 | S2 Gate bêta | Done | | Market-model residual with optional sector factor |
 | S3 Seuils & alertes candidates | Done | | Deterministic thresholds, short-history fallback, explicit quality decisions |
 | S4 Short interest / squeeze | Done | | Yahoo context with explicit unknown coverage |
-| S5 Dédup hystérésis | Not started | | |
+| S5 Dédup hystérésis | Done | | Persistent state, rearm, overrides, escalation, max-latch valve |
 | S6 Macro snapshot enrichi | Not started | | |
 | S7 Warren ciblé | Not started | | |
 | S8 Orchestration & livraison | Not started | | |
 
 ## Last implementation notes
 
+S5 consumes all S3 decisions so calm EOD observations can rearm a latch.
+Only genuinely new alerts proceed beyond S5. S4 remains context-only for S3;
+`squeeze_prone=True` is added as a synthetic S5 override type only when an S3
+candidate already exists.
 S4 is a context-only module and must not alter S3 candidate selection.
 Missing, unsupported, quarantined, or invalid short-interest data produces an
 unknown squeeze flag, never a false flag.
