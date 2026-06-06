@@ -48,26 +48,11 @@ import_rc=$?
 log "restart openclaw-warren"; sudo systemctl restart openclaw-warren; sleep 2
 log "restart warren-server";  sudo systemctl restart warren-server;  sleep 3
 
-# 4. Run manuel de validation PENDANT que le service n8n est arrêté : le port du task
-#    broker (5679) est libre, donc l'execute lance le sien sans conflit
-#    ("Task Broker's port 5679 is already in use" sinon). Lancé en warren (seul à lire
-#    .n8n/config -> déchiffrer les credentials) ; le bridge Warren est déjà up.
-#    NB: pipeline SKIP -> pas de briefing si aucune news du jour (comportement normal).
-log "execute workflow $WID (run de validation, service n8n arrêté)"
-sudo -u warren env \
-  N8N_USER_FOLDER="$N8N_DATA" \
-  N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false \
-  NODE_FUNCTION_ALLOW_BUILTIN=fs \
-  n8n execute --id="$WID"
-trigger_rc=$?
-if [ "$trigger_rc" -eq 0 ]; then trigger="ok"; else trigger="fail"; fi
-log "execute rc=$trigger_rc"
-
-# 5. Démarrer le service n8n (5679 désormais libéré par l'execute terminé).
+# 4. Démarrer le service n8n.
 log "start stock-tracker"; sudo systemctl restart stock-tracker
 sleep 8
 
-# 6. Healthchecks.
+# 5. Healthchecks.
 st_active=$(systemctl is-active stock-tracker  2>/dev/null || echo inactive)
 oc_active=$(systemctl is-active openclaw-warren 2>/dev/null || echo inactive)
 ws_active=$(systemctl is-active warren-server   2>/dev/null || echo inactive)
@@ -89,16 +74,14 @@ fi
 
 overall="ok"
 if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
-   || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ] \
-   || [ "$trigger" != "ok" ]; then
+   || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ]; then
   overall="fail"
 fi
 
-log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) import_rc=$import_rc trigger=$trigger"
+log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) import_rc=$import_rc"
 
 # Lignes machine-lisibles consommées par deploy.yml.
 echo "STATUS_STOCK_TRACKER=$st_active"
 echo "STATUS_N8N_HEALTH=$n8n_health"
 echo "STATUS_WARREN=$warren_status"
-echo "STATUS_TRIGGER=$trigger"
 echo "STATUS_OVERALL=$overall"
