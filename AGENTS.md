@@ -12,7 +12,6 @@ They are complementary and must not replace each other.
 ## Hard rules
 
 - Do not break the existing Warren/news workflow.
-- Do not rewrite Sprint 0 unless explicitly requested.
 - No LLM calls in the anomaly detection critical path.
 - Warren is called only after anomaly filtering, beta gate and dedup.
 - MacroSnapshot must be calculated once per run and reused.
@@ -21,16 +20,6 @@ They are complementary and must not replace each other.
 - Implement only one sprint per Codex run.
 - Add or update tests for every sprint.
 
-## Existing Sprint 0 foundation
-
-Use these as existing building blocks:
-
-- `market_intelligence/fetch_eod.py`
-- `market_intelligence/normalize_quality.py`
-- `market_intelligence/registry_schema.py`
-- `market_intelligence/data/registry.json`
-- `market_intelligence/data/quarantine.json`
-- `tests/market_intelligence/`
 
 ## Testing
 

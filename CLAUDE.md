@@ -1,5 +1,13 @@
 # Claude Code instructions for stock-tracker
 
+## 🤖 Instructions pour les agents dispatchés
+
+Si le fichier `.sprint.md` existe dans le répertoire courant, **le lire en premier**
+avant toute action. Il contient le périmètre exact du Sprint à implémenter, les
+dépendances, et le hors-scope. Utiliser les subagents `code-mapper`, `tester`, `reviewer`
+avant de modifier des fichiers.
+
+
 ## Project context
 
 This repository contains:
