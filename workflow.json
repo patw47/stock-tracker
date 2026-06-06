@@ -14,7 +14,7 @@
         }
       },
       "id": "node-schedule",
-      "name": "Schedule 16h Mon-Fri",
+      "name": "Layer A News Schedule 16h Mon-Fri",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -307,6 +307,109 @@
         500
       ],
       "parameters": {}
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 22 * * 1-5"
+            }
+          ]
+        },
+        "timezone": "Europe/Paris"
+      },
+      "id": "node-eod-schedule",
+      "name": "Layer B EOD Schedule 22h30 Paris",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "command": "cd /opt/apps/stock-tracker && python3 -m market_intelligence.eod_orchestrator --history-days 280"
+      },
+      "id": "node-eod-runner",
+      "name": "Run EOD Anomaly Pipeline S0-S7",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        520,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = ($json.stdout || '').trim();\nif (!raw) {\n  throw new Error('EOD anomaly runner produced no JSON payload');\n}\nlet payload;\ntry {\n  payload = JSON.parse(raw);\n} catch (error) {\n  throw new Error('Invalid EOD anomaly JSON payload: ' + error.message + '\\n' + raw.slice(0, 500));\n}\nreturn [{ json: payload }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "node-eod-parse-result",
+      "name": "Parse EOD Anomaly Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-eod-survivors",
+              "leftValue": "={{ $json.survivor_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "cond-eod-should-send",
+              "leftValue": "={{ $json.should_send }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-eod-if-survivors",
+      "name": "If EOD Survivors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1000,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { text: $json.digest || '' } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "node-eod-prep-telegram",
+      "name": "Prepare EOD Digest for Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        760
+      ]
     }
   ],
   "connections": {
@@ -454,7 +557,23 @@
         ]
       ]
     },
-    "Schedule 16h Mon-Fri": {
+    "Execute Trigger (deploy)": {
+      "main": [
+        [
+          {
+            "node": "Read Tickers",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Run EOD Anomaly Pipeline S0-S7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Layer A News Schedule 16h Mon-Fri": {
       "main": [
         [
           {
@@ -465,11 +584,56 @@
         ]
       ]
     },
-    "Execute Trigger (deploy)": {
+    "Layer B EOD Schedule 22h30 Paris": {
       "main": [
         [
           {
-            "node": "Read Tickers",
+            "node": "Run EOD Anomaly Pipeline S0-S7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run EOD Anomaly Pipeline S0-S7": {
+      "main": [
+        [
+          {
+            "node": "Parse EOD Anomaly Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse EOD Anomaly Result": {
+      "main": [
+        [
+          {
+            "node": "If EOD Survivors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If EOD Survivors": {
+      "main": [
+        [
+          {
+            "node": "Prepare EOD Digest for Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Prepare EOD Digest for Telegram": {
+      "main": [
+        [
+          {
+            "node": "Aggregate for Telegram",
             "type": "main",
             "index": 0
           }

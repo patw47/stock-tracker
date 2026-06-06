@@ -39,20 +39,22 @@ Sprint 0 correction PR:
 | S3 Seuils & alertes candidates | Done | | Deterministic thresholds, short-history fallback, explicit quality decisions |
 | S4 Short interest / squeeze | Done | | Yahoo context with explicit unknown coverage |
 | S5 Dédup hystérésis | Done | | Persistent state, rearm, overrides, escalation, max-latch valve |
-| S6 Macro snapshot enrichi | Not started | | |
-| S7 Warren ciblé | Not started | | |
-| S8 Orchestration & livraison | Not started | | |
+| S6 Macro snapshot enrichi | Done | | Deterministic macro snapshot cache; 10Y/IWM/OIL/VIX/DXY fields |
+| S7 Warren ciblé | Done | | Post-dedup Warren research context with EDGAR, squeeze and macro |
+| S8 Orchestration & livraison | Done | | EOD runner S0-S7 + n8n Layer B schedule/gated Telegram digest |
 
 ## Last implementation notes
 
-S5 consumes all S3 decisions so calm EOD observations can rearm a latch.
-Only genuinely new alerts proceed beyond S5. S4 remains context-only for S3;
-`squeeze_prone=True` is added as a synthetic S5 override type only when an S3
-candidate already exists.
-S4 is a context-only module and must not alter S3 candidate selection.
-Missing, unsupported, quarantined, or invalid short-interest data produces an
-unknown squeeze flag, never a false flag.
-Do not use legacy n8n ticker list as the technical-analysis source of truth.
+S8 adds `market_intelligence/eod_orchestrator.py` as the deployment boundary for
+the anomaly layer. It runs S0 fetch on the registry foundation, S1 signals, S2
+beta gate, S3 candidate decisions, S4 short context, S5 dedup, one S6 macro
+snapshot per run, and S7 Warren analysis only for post-dedup survivors.
+
+The n8n workflow now keeps Layer A news intact and adds a separate Layer B EOD
+branch scheduled at 22:30 Europe/Paris on weekdays. The branch calls the S8
+runner, gates on `survivor_count > 0` and `should_send`, then reuses the
+existing Telegram aggregate/split/send nodes for one digest. No-survivor days
+stop before Telegram.
 
 ## Known risks
 
