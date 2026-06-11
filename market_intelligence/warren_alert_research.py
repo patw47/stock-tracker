@@ -5,16 +5,20 @@ import os
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Final, Literal
+from typing import Final
 
 from market_intelligence.edgar_form4 import (
     EdgarForm4Result,
     fetch_company_form4_filings,
 )
 from market_intelligence.macro_snapshot import MacroEnrichedAlert, MacroSnapshot
+from market_intelligence.market_status import (
+    MarketStatus,
+    MarketStructureStatus,
+    fetch_market_status,
+)
 from market_intelligence.registry_schema import Registry, TickerEntry, load_registry
 
-MarketStatus = Literal["active", "inactive", "halted", "unknown"]
 WarrenClient = Callable[[str], str]
 EdgarFetcher = Callable[[TickerEntry], EdgarForm4Result]
 ResearchFetcher = Callable[[TickerEntry], tuple["ResearchItem", ...]]
@@ -41,19 +45,6 @@ def _read_ticker_news_memory(ticker: str) -> str | None:
 
 class WarrenAlertResearchError(Exception):
     """Base error for Sprint 7 targeted Warren alert research."""
-
-
-@dataclass(frozen=True)
-class MarketStructureStatus:
-    """Represent explicit halt and short-sale-restriction status."""
-
-    halt_status: MarketStatus
-    ssr_status: MarketStatus
-    data_issues: tuple[str, ...] = ()
-
-    def to_dict(self) -> dict[str, object]:
-        """Return a JSON-compatible representation."""
-        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -151,14 +142,6 @@ def _default_sector_research(entry: TickerEntry) -> tuple[ResearchItem, ...]:
     return fetch_sector_news_for_entry(entry)
 
 
-def _unknown_market_status(_: TickerEntry) -> MarketStructureStatus:
-    return MarketStructureStatus(
-        halt_status="unknown",
-        ssr_status="unknown",
-        data_issues=("halt_status_unknown", "ssr_status_unknown"),
-    )
-
-
 def _default_warren_client(prompt: str) -> str:
     from warren_server import call_warren
 
@@ -181,7 +164,7 @@ def build_alert_research_context(
     product_research_fetcher: ResearchFetcher = _empty_research,
     sector_research_fetcher: ResearchFetcher = _empty_research,
     market_status_fetcher: Callable[[TickerEntry], MarketStructureStatus] = (
-        _unknown_market_status
+        fetch_market_status
     ),
 ) -> AlertResearchContext:
     """Build structured Sprint 7 context for exactly one post-dedup alert."""
@@ -264,7 +247,7 @@ def analyze_alerts(
     product_research_fetcher: ResearchFetcher = _default_product_research,
     sector_research_fetcher: ResearchFetcher = _default_sector_research,
     market_status_fetcher: Callable[[TickerEntry], MarketStructureStatus] = (
-        _unknown_market_status
+        fetch_market_status
     ),
     warren_client: WarrenClient = _default_warren_client,
 ) -> tuple[WarrenAlertAnalysis, ...]:
