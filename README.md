@@ -91,99 +91,94 @@ No alert survives → nothing is sent.
 
 ---
 
-## 🔍 La détection d'anomalies, expliquée simplement
+## 🔍 Anomaly detection to anticipate a potential move
 
-*Cette section vulgarise la couche B pour un lecteur non matheux.*
+### The problem we are solving
 
-### Le problème qu'on résout
+On speculative small caps, **price often moves before the news becomes public**
+(rumor, accumulation, squeeze). A pipeline that only reads news therefore arrives
+late. Layer B does not predict anything: it detects that **an unusual move has
+just happened**, then asks Warren to investigate. It is an attention detector,
+not a crystal ball.
 
-Sur les small-caps spéculatives, **le prix bouge souvent avant que la news soit
-publique** (rumeur, accumulation, squeeze). Un pipeline qui ne lit que les news
-arrive donc en retard. La couche B ne prédit rien : elle détecte qu'**un
-mouvement inhabituel vient de se produire**, et demande ensuite à Warren
-d'enquêter. C'est un détecteur d'attention, pas une boule de cristal.
+### Step 1 — "Is this move unusual for THIS ticker?" (the z-score)
 
-### Étape 1 — « Ce mouvement est-il inhabituel pour CE titre ? » (le z-score)
+A stock moving 8% in one day is huge for Xylem (a quiet water company) and
+ordinary for Rigetti (a volatile quantum stock). A fixed percentage threshold
+would therefore make no sense. Instead, the day's move is compared with **the
+ticker's own behavior** over the last 60 days:
 
-Un titre qui bouge de 8 % en un jour, c'est énorme pour Xylem (entreprise d'eau,
-tranquille) et banal pour Rigetti (quantique, nerveuse). Un seuil fixe en % serait
-donc absurde. À la place, on compare le mouvement du jour à **l'habitude du titre
-lui-même** sur les 60 derniers jours :
+> **z-score = "how many times larger than usual?"**
+> z = 1 → normal day. z = 2 → big, rare day. z = 3 → exceptional.
 
-> **z-score = « combien de fois plus gros que d'habitude ? »**
-> z = 1 → journée normale. z = 2 → grosse journée, rare. z = 3 → exceptionnel.
+The z-score "normalizes" each ticker by its own volatility.
 
-C'est la même idée qu'une courbe de température : 38,5 °C n'a pas le même sens
-selon que votre température habituelle est 36,5 °C ou 38 °C. Le z-score
-« normalise » chaque titre par sa propre nervosité.
+Robustness detail: "usual behavior" is measured with the **median** (MAD) rather
+than the mean, so that a few past extreme sessions do not distort the reference.
 
-Détail robuste : on mesure « l'habitude » avec la **médiane** (MAD) plutôt que la
-moyenne, pour que quelques journées folles passées ne faussent pas la référence —
-comme un juge de patinage qui élimine les notes extrêmes.
+### Step 2 — "Is the ticker moving, or is the whole market moving?" (the beta gate)
 
-### Étape 2 — « C'est le titre qui bouge, ou tout le marché ? » (le gate béta)
+If the whole small-cap market drops 3%, your speculative ticker may drop 5%
+without any company-specific news. Alerting on that would be noise. The image:
+**the tide vs. the wave**. We want to detect the wave (the ticker's own move),
+not the tide (the whole market's move).
 
-Si tout le marché small-cap chute de 3 %, votre titre spéculatif chute de 5 % —
-sans aucune news propre. Alerter là-dessus serait du bruit. L'image : **la marée
-vs la vague**. On veut détecter la vague (mouvement propre au titre), pas la
-marée (mouvement du marché entier).
+In practice, the system learns the ticker's market sensitivity over 60 days
+(its "beta": *when the IWM small-cap index moves 1%, this ticker moves 2% on
+average*). On the day of the move, it calculates the **expected** move given what
+the market did, subtracts it from the real move, and keeps the **residual**: the
+part of the move the market does not explain. The z-score from step 1 is applied
+to this residual.
 
-Concrètement, on apprend sur 60 jours la sensibilité du titre au marché
-(son « béta » : *quand l'indice small-cap IWM bouge de 1 %, ce titre bouge en
-moyenne de 2 %*). Le jour J, on calcule le mouvement **attendu** vu ce qu'a fait
-le marché, on le soustrait du mouvement réel, et il reste le **résidu** : la part
-du mouvement que le marché n'explique pas. C'est sur ce résidu qu'on applique le
-z-score de l'étape 1.
+For strongly thematic stocks (nuclear, quantum, water...), the system also
+removes the part explained by the sector ETF (NUKZ for SMR/OKLO, QTUM for
+RGTI...), but only if the ticker actually follows that ETF (correlation > 0.35);
+otherwise it would only introduce noise.
 
-Pour les titres à forte thématique (nucléaire, quantique, eau…), on retire aussi
-la part expliquée par l'ETF sectoriel (NUKZ pour SMR/OKLO, QTUM pour RGTI…) —
-mais seulement si le titre suit réellement cet ETF (corrélation > 0,35), sinon
-on n'introduirait que du bruit.
+> A price alert = **|residual z| > 2** (calmer names: XYL, MMED)
+> or **> 2.5** (speculative cluster: RGTI, BBAI, OKLO...).
+> One global setting; per-ticker normalization does the rest.
 
-> Une alerte de prix = **|z du résidu| > 2** (titres calmes : XYL, MMED)
-> ou **> 2,5** (cluster spéculatif : RGTI, BBAI, OKLO…).
-> Un seul réglage global, la normalisation par titre fait le reste.
+### Step 3 — The other sensors
 
-### Étape 3 — Les autres capteurs
+- **RVOL (relative volume)**: today's volume ÷ 20-day average volume. Volume
+  ×3 with no news = someone may know something, or a squeeze may be starting.
+  This is the #1 early signal on small caps.
+- **ATR expansion**: the day's range (high-low) exceeds 1.5× the usual range →
+  "the ticker is waking up", even if it closes flat.
+- **52-week breakout**: new yearly high or low.
+- **Combination**: alert if price is abnormal, OR if abnormal volume + a second
+  signal confirms it.
 
-- **RVOL (volume relatif)** : volume du jour ÷ volume moyen 20 jours. Un volume
-  ×3 sans news = quelqu'un sait quelque chose, ou un squeeze démarre. C'est le
-  signal précoce n°1 sur les small-caps.
-- **Expansion ATR** : l'amplitude du jour (haut-bas) dépasse 1,5× l'amplitude
-  habituelle → « le titre se réveille », même si la clôture finit à plat.
-- **Cassure 52 semaines** : nouveau plus-haut/plus-bas annuel.
-- **Combinaison** : alerte si le prix est anormal, OU si volume anormal + un
-  deuxième signal le confirme.
+### Step 4 — Avoid crying wolf twice (hysteresis)
 
-### Étape 4 — Ne pas crier au loup deux fois (l'hystérésis)
+A stock that takes off often remains volatile for several days. Without a
+guardrail, the same alert would arrive every evening. The mechanism works like a
+**thermostat**: once the alert fires, the ticker is "locked" and does not
+re-alert **until it has calmed down again** (|z| < 1 for at least one day),
+unless something genuinely new happens: direction reversal, a new signal type,
+or a clear escalation. Safety valve: after about 10 trading days, the lock
+expires.
 
-Un titre qui s'envole reste souvent agité plusieurs jours. Sans garde-fou, on
-recevrait la même alerte chaque soir. Le mécanisme fonctionne comme un
-**thermostat** : une fois l'alerte déclenchée, le titre est « verrouillé » et ne
-ré-alerte plus **tant qu'il n'est pas redevenu calme** (|z| < 1 pendant au moins
-un jour) — sauf si quelque chose de vraiment nouveau arrive : inversion de
-direction, nouveau type de signal, ou escalade nette. Soupape de sécurité :
-au bout de ~10 jours de bourse, le verrou saute.
+### Step 5 — Warren investigates (and is allowed to find nothing)
 
-### Étape 5 — Warren enquête (et a le droit de ne rien trouver)
+Only surviving alerts cost an LLM call. Warren receives a structured dossier:
+insider buying/selling (SEC EDGAR Form 4), product and sector news, trading
+suspension status (FINRA), short-sale restriction status (Nasdaq), a
+"squeeze-prone ticker" flag (short interest), Layer A's news memory for that
+ticker, and the day's macro context. Warren must explain the move **without
+making things up**: the prompt explicitly allows it to conclude *"no identifiable
+catalyst — flow/technical/squeeze likely"*.
 
-Seules les alertes survivantes coûtent un appel LLM. Warren reçoit un dossier
-structuré — achats/ventes d'initiés (SEC EDGAR Form 4), news produit et secteur,
-statut de suspension de cotation (FINRA) et de restriction de vente à découvert
-(Nasdaq), flag « titre squeeze-prone » (short interest), la mémoire news de la
-couche A pour ce ticker, et le contexte macro du jour — et doit expliquer le
-mouvement **sans inventer** : le prompt l'autorise explicitement à conclure
-*« aucun catalyseur identifiable — flux/technique/squeeze probable »*.
+### What anomaly detection does not do
 
-### Ce que la couche B ne fait PAS
+- It does not predict direction (a volume spike says "look", not "it goes up").
+- It does not trade. A high false-positive rate is accepted: this is an
+  attention tool, strictly better than a daily news scan, not a robot.
 
-- Elle ne prédit pas la direction (un pic de volume dit « regarde », pas « ça monte »).
-- Elle ne trade pas. Taux de faux positifs élevé assumé — c'est un outil
-  d'attention, strictement meilleur qu'un scan quotidien des news, pas un robot.
-
-Configuration : seuils dans `market_intelligence/data/alert_thresholds.json`,
-mapping sectoriel dans `data/sector_factors.json`, hystérésis dans
-`data/dedup_thresholds.json`, squeeze dans `data/short_interest_thresholds.json`.
+Configuration: thresholds in `market_intelligence/data/alert_thresholds.json`,
+sector mapping in `data/sector_factors.json`, hysteresis in
+`data/dedup_thresholds.json`, squeeze in `data/short_interest_thresholds.json`.
 
 ---
 
