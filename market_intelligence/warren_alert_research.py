@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
-from typing import Final, Literal
+from pathlib import Path
+from typing import Final
 
 from market_intelligence.edgar_form4 import (
     EdgarForm4Result,
     fetch_company_form4_filings,
 )
 from market_intelligence.macro_snapshot import MacroEnrichedAlert, MacroSnapshot
+from market_intelligence.market_status import (
+    MarketStatus,
+    MarketStructureStatus,
+    fetch_market_status,
+)
 from market_intelligence.registry_schema import Registry, TickerEntry, load_registry
 
-MarketStatus = Literal["active", "inactive", "halted", "unknown"]
 WarrenClient = Callable[[str], str]
 EdgarFetcher = Callable[[TickerEntry], EdgarForm4Result]
 ResearchFetcher = Callable[[TickerEntry], tuple["ResearchItem", ...]]
@@ -22,22 +28,23 @@ _NO_CATALYST_RULE: Final[str] = (
     "aucun catalyseur identifiable - flux/technique/squeeze probable."
 )
 
+_WARREN_MEMORY_DIR_DEFAULT: Final[str] = (
+    "/home/warren/.openclaw/workspace-warren/memory/tickers"
+)
+
+
+def _read_ticker_news_memory(ticker: str) -> str | None:
+    """Read Layer A news memory for ticker; return raw content or None if absent."""
+    memory_dir = os.environ.get("WARREN_MEMORY_DIR", _WARREN_MEMORY_DIR_DEFAULT)
+    path = Path(memory_dir) / f"{ticker}.md"
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+
 
 class WarrenAlertResearchError(Exception):
     """Base error for Sprint 7 targeted Warren alert research."""
-
-
-@dataclass(frozen=True)
-class MarketStructureStatus:
-    """Represent explicit halt and short-sale-restriction status."""
-
-    halt_status: MarketStatus
-    ssr_status: MarketStatus
-    data_issues: tuple[str, ...] = ()
-
-    def to_dict(self) -> dict[str, object]:
-        """Return a JSON-compatible representation."""
-        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -65,6 +72,7 @@ class AlertResearchContext:
     sector_research: tuple[ResearchItem, ...]
     market_status: MarketStructureStatus
     data_issues: tuple[str, ...]
+    ticker_news_memory: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible representation."""
@@ -102,6 +110,7 @@ class AlertResearchContext:
             "sector_research": [item.to_dict() for item in self.sector_research],
             "macro_snapshot": asdict(self.enriched_alert.macro_snapshot),
             "data_issues": list(self.data_issues),
+            "ticker_news_memory": self.ticker_news_memory,
         }
 
 
@@ -119,12 +128,18 @@ def _empty_research(_: TickerEntry) -> tuple[ResearchItem, ...]:
     return ()
 
 
-def _unknown_market_status(_: TickerEntry) -> MarketStructureStatus:
-    return MarketStructureStatus(
-        halt_status="unknown",
-        ssr_status="unknown",
-        data_issues=("halt_status_unknown", "ssr_status_unknown"),
-    )
+def _default_product_research(entry: TickerEntry) -> tuple[ResearchItem, ...]:
+    # Lazy import to avoid circular dependency (web_research imports ResearchItem from here).
+    from market_intelligence.web_research import fetch_ticker_news
+
+    return fetch_ticker_news(entry)
+
+
+def _default_sector_research(entry: TickerEntry) -> tuple[ResearchItem, ...]:
+    # Lazy import to avoid circular dependency (web_research imports ResearchItem from here).
+    from market_intelligence.web_research import fetch_sector_news_for_entry
+
+    return fetch_sector_news_for_entry(entry)
 
 
 def _default_warren_client(prompt: str) -> str:
@@ -149,13 +164,14 @@ def build_alert_research_context(
     product_research_fetcher: ResearchFetcher = _empty_research,
     sector_research_fetcher: ResearchFetcher = _empty_research,
     market_status_fetcher: Callable[[TickerEntry], MarketStructureStatus] = (
-        _unknown_market_status
+        fetch_market_status
     ),
 ) -> AlertResearchContext:
     """Build structured Sprint 7 context for exactly one post-dedup alert."""
     ticker = enriched_alert.alert.candidate.ticker
     ticker_registry = registry or load_registry()
     entry = _registry_lookup(ticker_registry).get(ticker)
+    news_memory = _read_ticker_news_memory(ticker)
     if entry is None:
         edgar = _missing_edgar(ticker, "ticker_registry_missing")
         return AlertResearchContext(
@@ -170,6 +186,7 @@ def build_alert_research_context(
                 data_issues=("ticker_registry_missing",),
             ),
             data_issues=("ticker_registry_missing",),
+            ticker_news_memory=news_memory,
         )
 
     fetch_edgar = edgar_fetcher or fetch_company_form4_filings
@@ -192,26 +209,34 @@ def build_alert_research_context(
         sector_research=sector_research,
         market_status=market_status,
         data_issues=issues,
+        ticker_news_memory=news_memory,
     )
 
 
 def build_alert_research_prompt(context: AlertResearchContext) -> str:
     """Render the targeted Warren prompt for one anomaly alert."""
     payload = json.dumps(context.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
-    return "\n".join(
-        (
-            "[ANOMALY-ALERT-RESEARCH S7]",
-            "Objectif: expliquer le pourquoi plausible de cette alerte EOD sans confabuler.",
-            "Utilise uniquement le contexte structure ci-dessous et la recherche produit/secteur fournie.",
-            "Les Form 4 EDGAR sont des donnees structurees, pas une recherche web.",
-            _NO_CATALYST_RULE,
-            "Si un statut ou une donnee est unknown/null, signale l'incertitude.",
-            "Reponse attendue: catalyseur probable, preuves, signaux techniques/flux, risques de donnees, conclusion.",
+    parts: list[str] = [
+        "[ANOMALY-ALERT-RESEARCH S7]",
+        "Objectif: expliquer le pourquoi plausible de cette alerte EOD sans confabuler.",
+        "Utilise uniquement le contexte structure ci-dessous et la recherche produit/secteur fournie.",
+        "Les Form 4 EDGAR sont des donnees structurees, pas une recherche web.",
+        _NO_CATALYST_RULE,
+        "Si un statut ou une donnee est unknown/null, signale l'incertitude.",
+        "Reponse attendue: catalyseur probable, preuves, signaux techniques/flux, risques de donnees, conclusion.",
+        "",
+    ]
+    if context.ticker_news_memory is not None:
+        parts += [
+            "=== MÉMOIRE NEWS LAYER A (dernières sessions) ===",
+            context.ticker_news_memory,
             "",
-            "=== CONTEXTE STRUCTURE ===",
-            payload,
-        )
-    )
+        ]
+    parts += [
+        "=== CONTEXTE STRUCTURE ===",
+        payload,
+    ]
+    return "\n".join(parts)
 
 
 def analyze_alerts(
@@ -219,10 +244,10 @@ def analyze_alerts(
     *,
     registry: Registry | None = None,
     edgar_fetcher: EdgarFetcher | None = None,
-    product_research_fetcher: ResearchFetcher = _empty_research,
-    sector_research_fetcher: ResearchFetcher = _empty_research,
+    product_research_fetcher: ResearchFetcher = _default_product_research,
+    sector_research_fetcher: ResearchFetcher = _default_sector_research,
     market_status_fetcher: Callable[[TickerEntry], MarketStructureStatus] = (
-        _unknown_market_status
+        fetch_market_status
     ),
     warren_client: WarrenClient = _default_warren_client,
 ) -> tuple[WarrenAlertAnalysis, ...]:

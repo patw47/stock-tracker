@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from unittest.mock import Mock
 
 from market_intelligence.candidate_alerts import CandidateAlert
@@ -216,3 +217,89 @@ def test_product_and_sector_search_are_mocked_and_included_as_context() -> None:
     assert "New product context" in prompt
     assert "Sector demand" in prompt
     assert "Sector context" in prompt
+
+
+# --- Sprint 1: ticker_news_memory ---
+
+
+def test_ticker_news_memory_present(tmp_path: pytest.TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    memory_file = tmp_path / "TEST.md"
+    memory_file.write_text("# TEST\nsome news", encoding="utf-8")
+    monkeypatch.setenv("WARREN_MEMORY_DIR", str(tmp_path))
+
+    context = build_alert_research_context(
+        _enriched(),
+        registry=_registry(),
+        edgar_fetcher=_edgar,
+    )
+
+    assert context.ticker_news_memory == "# TEST\nsome news"
+
+
+def test_ticker_news_memory_absent(tmp_path: pytest.TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WARREN_MEMORY_DIR", str(tmp_path))
+
+    context = build_alert_research_context(
+        _enriched(),
+        registry=_registry(),
+        edgar_fetcher=_edgar,
+    )
+
+    assert context.ticker_news_memory is None
+
+
+def test_to_dict_includes_ticker_news_memory_key(tmp_path: pytest.TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    memory_file = tmp_path / "TEST.md"
+    memory_file.write_text("# TEST\nsome news", encoding="utf-8")
+    monkeypatch.setenv("WARREN_MEMORY_DIR", str(tmp_path))
+
+    context_present = build_alert_research_context(
+        _enriched(), registry=_registry(), edgar_fetcher=_edgar
+    )
+    monkeypatch.setenv("WARREN_MEMORY_DIR", str(tmp_path / "empty"))
+    context_absent = build_alert_research_context(
+        _enriched(), registry=_registry(), edgar_fetcher=_edgar
+    )
+
+    assert context_present.to_dict()["ticker_news_memory"] == "# TEST\nsome news"
+    assert context_absent.to_dict()["ticker_news_memory"] is None
+
+
+def test_ticker_news_memory_env_var_override(tmp_path: pytest.TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    dir_a = tmp_path / "dir_a"
+    dir_b = tmp_path / "dir_b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    (dir_b / "TEST.md").write_text("from dir_b", encoding="utf-8")
+    monkeypatch.setenv("WARREN_MEMORY_DIR", str(dir_b))
+
+    context = build_alert_research_context(
+        _enriched(), registry=_registry(), edgar_fetcher=_edgar
+    )
+
+    assert context.ticker_news_memory == "from dir_b"
+
+
+def test_prompt_includes_memory_section_when_present(tmp_path: pytest.TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "TEST.md").write_text("latest news", encoding="utf-8")
+    monkeypatch.setenv("WARREN_MEMORY_DIR", str(tmp_path))
+
+    context = build_alert_research_context(
+        _enriched(), registry=_registry(), edgar_fetcher=_edgar
+    )
+    prompt = build_alert_research_prompt(context)
+
+    assert "=== MÉMOIRE NEWS LAYER A (dernières sessions) ===" in prompt
+    assert "latest news" in prompt
+    assert prompt.index("=== MÉMOIRE NEWS LAYER A") < prompt.index("=== CONTEXTE STRUCTURE ===")
+
+
+def test_prompt_excludes_memory_section_when_absent(tmp_path: pytest.TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WARREN_MEMORY_DIR", str(tmp_path))
+
+    context = build_alert_research_context(
+        _enriched(), registry=_registry(), edgar_fetcher=_edgar
+    )
+    prompt = build_alert_research_prompt(context)
+
+    assert "=== MÉMOIRE NEWS LAYER A" not in prompt
