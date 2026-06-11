@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Final, Literal
 
 from market_intelligence.edgar_form4 import (
@@ -21,6 +23,20 @@ _NO_CATALYST_RULE: Final[str] = (
     "Tu peux conclure explicitement: "
     "aucun catalyseur identifiable - flux/technique/squeeze probable."
 )
+
+_WARREN_MEMORY_DIR_DEFAULT: Final[str] = (
+    "/home/warren/.openclaw/workspace-warren/memory/tickers"
+)
+
+
+def _read_ticker_news_memory(ticker: str) -> str | None:
+    """Read Layer A news memory for ticker; return raw content or None if absent."""
+    memory_dir = os.environ.get("WARREN_MEMORY_DIR", _WARREN_MEMORY_DIR_DEFAULT)
+    path = Path(memory_dir) / f"{ticker}.md"
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
 
 
 class WarrenAlertResearchError(Exception):
@@ -65,6 +81,7 @@ class AlertResearchContext:
     sector_research: tuple[ResearchItem, ...]
     market_status: MarketStructureStatus
     data_issues: tuple[str, ...]
+    ticker_news_memory: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible representation."""
@@ -102,6 +119,7 @@ class AlertResearchContext:
             "sector_research": [item.to_dict() for item in self.sector_research],
             "macro_snapshot": asdict(self.enriched_alert.macro_snapshot),
             "data_issues": list(self.data_issues),
+            "ticker_news_memory": self.ticker_news_memory,
         }
 
 
@@ -170,6 +188,7 @@ def build_alert_research_context(
     ticker = enriched_alert.alert.candidate.ticker
     ticker_registry = registry or load_registry()
     entry = _registry_lookup(ticker_registry).get(ticker)
+    news_memory = _read_ticker_news_memory(ticker)
     if entry is None:
         edgar = _missing_edgar(ticker, "ticker_registry_missing")
         return AlertResearchContext(
@@ -184,6 +203,7 @@ def build_alert_research_context(
                 data_issues=("ticker_registry_missing",),
             ),
             data_issues=("ticker_registry_missing",),
+            ticker_news_memory=news_memory,
         )
 
     fetch_edgar = edgar_fetcher or fetch_company_form4_filings
@@ -206,26 +226,34 @@ def build_alert_research_context(
         sector_research=sector_research,
         market_status=market_status,
         data_issues=issues,
+        ticker_news_memory=news_memory,
     )
 
 
 def build_alert_research_prompt(context: AlertResearchContext) -> str:
     """Render the targeted Warren prompt for one anomaly alert."""
     payload = json.dumps(context.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
-    return "\n".join(
-        (
-            "[ANOMALY-ALERT-RESEARCH S7]",
-            "Objectif: expliquer le pourquoi plausible de cette alerte EOD sans confabuler.",
-            "Utilise uniquement le contexte structure ci-dessous et la recherche produit/secteur fournie.",
-            "Les Form 4 EDGAR sont des donnees structurees, pas une recherche web.",
-            _NO_CATALYST_RULE,
-            "Si un statut ou une donnee est unknown/null, signale l'incertitude.",
-            "Reponse attendue: catalyseur probable, preuves, signaux techniques/flux, risques de donnees, conclusion.",
+    parts: list[str] = [
+        "[ANOMALY-ALERT-RESEARCH S7]",
+        "Objectif: expliquer le pourquoi plausible de cette alerte EOD sans confabuler.",
+        "Utilise uniquement le contexte structure ci-dessous et la recherche produit/secteur fournie.",
+        "Les Form 4 EDGAR sont des donnees structurees, pas une recherche web.",
+        _NO_CATALYST_RULE,
+        "Si un statut ou une donnee est unknown/null, signale l'incertitude.",
+        "Reponse attendue: catalyseur probable, preuves, signaux techniques/flux, risques de donnees, conclusion.",
+        "",
+    ]
+    if context.ticker_news_memory is not None:
+        parts += [
+            "=== MÉMOIRE NEWS LAYER A (dernières sessions) ===",
+            context.ticker_news_memory,
             "",
-            "=== CONTEXTE STRUCTURE ===",
-            payload,
-        )
-    )
+        ]
+    parts += [
+        "=== CONTEXTE STRUCTURE ===",
+        payload,
+    ]
+    return "\n".join(parts)
 
 
 def analyze_alerts(
