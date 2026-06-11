@@ -119,6 +119,20 @@ def _empty_research(_: TickerEntry) -> tuple[ResearchItem, ...]:
     return ()
 
 
+def _default_product_research(entry: TickerEntry) -> tuple[ResearchItem, ...]:
+    # Lazy import to avoid circular dependency (web_research imports ResearchItem from here).
+    from market_intelligence.web_research import fetch_ticker_news
+
+    return fetch_ticker_news(entry)
+
+
+def _default_sector_research(entry: TickerEntry) -> tuple[ResearchItem, ...]:
+    # Lazy import to avoid circular dependency (web_research imports ResearchItem from here).
+    from market_intelligence.web_research import fetch_sector_news_for_entry
+
+    return fetch_sector_news_for_entry(entry)
+
+
 def _unknown_market_status(_: TickerEntry) -> MarketStructureStatus:
     return MarketStructureStatus(
         halt_status="unknown",
@@ -219,8 +233,8 @@ def analyze_alerts(
     *,
     registry: Registry | None = None,
     edgar_fetcher: EdgarFetcher | None = None,
-    product_research_fetcher: ResearchFetcher = _empty_research,
-    sector_research_fetcher: ResearchFetcher = _empty_research,
+    product_research_fetcher: ResearchFetcher = _default_product_research,
+    sector_research_fetcher: ResearchFetcher = _default_sector_research,
     market_status_fetcher: Callable[[TickerEntry], MarketStructureStatus] = (
         _unknown_market_status
     ),
