@@ -314,14 +314,14 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "30 22 * * 1-5"
+              "expression": "30 21 * * 1-5"
             }
           ]
         },
-        "timezone": "Europe/Paris"
+        "timezone": "UTC"
       },
       "id": "node-eod-schedule",
-      "name": "Layer B EOD Schedule 22h30 Paris",
+      "name": "Layer B EOD Schedule 21h30 UTC",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -584,7 +584,7 @@
         ]
       ]
     },
-    "Layer B EOD Schedule 22h30 Paris": {
+    "Layer B EOD Schedule 21h30 UTC": {
       "main": [
         [
           {

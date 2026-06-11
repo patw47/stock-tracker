@@ -53,12 +53,12 @@ def test_eod_branch_uses_registry_runner_and_reuses_telegram_nodes() -> None:
     workflow = _workflow()
     nodes = _nodes_by_name(workflow)
 
-    schedule = nodes["Layer B EOD Schedule 22h30 Paris"]
+    schedule = nodes["Layer B EOD Schedule 21h30 UTC"]
     assert schedule["parameters"]["rule"]["interval"][0]["expression"] == (
-        "30 22 * * 1-5"
+        "30 21 * * 1-5"
     )
-    assert schedule["parameters"]["timezone"] == "Europe/Paris"
-    assert _edge_targets(workflow, "Layer B EOD Schedule 22h30 Paris") == [
+    assert schedule["parameters"]["timezone"] == "UTC"
+    assert _edge_targets(workflow, "Layer B EOD Schedule 21h30 UTC") == [
         "Run EOD Anomaly Pipeline S0-S7"
     ]
 
@@ -87,7 +87,7 @@ def test_eod_branch_has_no_llm_or_warren_before_survivor_gate() -> None:
     workflow = _workflow()
     nodes = _nodes_by_name(workflow)
 
-    pre_gate = _reachable(workflow, "Layer B EOD Schedule 22h30 Paris")
+    pre_gate = _reachable(workflow, "Layer B EOD Schedule 21h30 UTC")
     assert "If EOD Survivors" in pre_gate
     pre_gate.remove("If EOD Survivors")
     pre_gate -= _reachable(workflow, "If EOD Survivors")
