@@ -38,9 +38,15 @@ Trigger** node (besides the Schedule Trigger) because the CLI cannot start from 
 trigger. SKIP logic means no briefing is sent if there's no fresh news — expected; the
 deploy status message still arrives.
 
-**Python deps** — `warren_server.py` / `agents/warren` need `pydantic` + `requests`
-(`requirements.txt`); `remote.sh` pip-installs them into the system python (the one
-`warren-server.service` runs) before restarting.
+**Python deps** — `warren_server.py` / `agents/warren` need `pydantic`, `requests` and
+`anthropic` (macro snapshot via web search); `market_intelligence/` needs `numpy`,
+`pandas`, `yfinance`, `pyarrow` (`requirements.txt`); `remote.sh` pip-installs them into
+the system python (the one `warren-server.service` runs) before restarting.
+
+**Service env** — `warren-server.service` must load `/opt/apps/stock-tracker/.env`
+(`EnvironmentFile=` directive — applied via drop-in `warren-server.service.d/override.conf`
+on the VPS, 2026-06-11) so the bridge has `ANTHROPIC_API_KEY` for the macro snapshot.
+Without it the briefing silently falls back to hardcoded macro values.
 
 **Required GitHub secrets** — `TELEGRAM_ORCHESTRATION_BOT_TOKEN`,
 `TELEGRAM_ORCHESTRATION_CHAT_ID`, `PROJECT_NAME` (status message). No SSH secrets needed
