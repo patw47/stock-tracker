@@ -65,9 +65,9 @@ Structure every daily briefing response using exactly this template, in this ord
 
 📈 Veille du {date}
 🌍 MACRO DU JOUR
+- Géopolitique : {geopolitical_notes}
 - Fed : {fed_stance}
 - Dollar/inflation : {dollar_signal}
-- Géopolitique : {geopolitical_notes}
 → Ambiance générale : {overall_sentiment}
 - Prochaines News: {upcoming_events}
 ────────────────────────
@@ -92,21 +92,38 @@ Per-ticker block format — signal line first, NO headings:
   → {conclusion}
 
 Output rules:
-1. NEVER use # markdown headings anywhere in the output.
+1. NEVER use # markdown headings (#, ##, ###, ####) anywhere in the output.
 2. NEVER include raw percentage numbers for CPI/PCE — use sentiment only.
 3. Signal/recommendation must appear on the FIRST line of each ticker entry.
-4. Keep justifications to one sentence maximum.
-5. Alerts section must flag any ticker symbol that looks incorrect or ambiguous."""
+4. Keep justifications to one sentence maximum, in plain French a non-specialist
+can read — no dense jargon, no abbreviations chains.
+5. Alerts section must flag any ticker symbol that looks incorrect or ambiguous.
+6. MACRO DU JOUR describes the EXTERNAL environment only — geopolitical risks and
+conflicts moving markets, Fed stance, dollar — taken from the === MACRO DU JOUR ===
+data section. NEVER summarize portfolio sectors or individual tickers there.
+7. The REASONING PROTOCOL stays internal: never print its steps (Business Quality,
+Financial Strength, Valuation, Risks, Verdict) as sections of the output."""
 
 _N8N_SKILL_OUTPUT_RULES = """\
 === N8N SKILL OUTPUT RULES ===
 The user query contains a pipeline skill marker. Follow that marker's task-specific \
 format instead of the generic company-analysis output format.
 - For [TICKER-WATCH SKILL], return only the JSON object requested by the query.
-- For [EXECUTIVE-SYNTHESIS SKILL], write the French executive briefing requested by \
-the query.
 - Never answer NO_REPLY. If the input contains no material news, explicitly say so in \
 the requested format."""
+
+_N8N_SYNTHESIS_OUTPUT_RULES = "\n\n".join(
+    (
+        """\
+=== N8N SKILL OUTPUT RULES ===
+The user query contains the [EXECUTIVE-SYNTHESIS SKILL] pipeline marker.
+Write the French executive briefing requested by the query, using EXACTLY the
+output format below — it overrides any other formatting habit.
+- Never answer NO_REPLY. If the input contains no material news, explicitly say so in \
+the requested format.""",
+        _OUTPUT_STRUCTURE,
+    )
+)
 
 
 def _fmt(value: object, suffix: str = "") -> str:
@@ -235,11 +252,12 @@ def build_prompt(
     New callers should prefer macro_snapshot + briefing_date; macro_context
     remains supported until warren-orchestration-wiring migrates.
     """
-    output_rules = (
-        _N8N_SKILL_OUTPUT_RULES
-        if "[TICKER-WATCH SKILL]" in query or "[EXECUTIVE-SYNTHESIS SKILL]" in query
-        else _OUTPUT_STRUCTURE
-    )
+    if "[TICKER-WATCH SKILL]" in query:
+        output_rules = _N8N_SKILL_OUTPUT_RULES
+    elif "[EXECUTIVE-SYNTHESIS SKILL]" in query:
+        output_rules = _N8N_SYNTHESIS_OUTPUT_RULES
+    else:
+        output_rules = _OUTPUT_STRUCTURE
     parts = [_SYSTEM_PERSONA, output_rules]
     if macro_snapshot is not None:
         parts.append(_render_macro_snapshot(macro_snapshot, briefing_date))
