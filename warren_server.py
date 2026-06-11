@@ -185,6 +185,8 @@ def _clean_synthesis(text):
         return m.group(1).strip()
     idx = text.find("# 📈")
     if idx < 0:
+        idx = text.find("📈")
+    if idx < 0:
         idx = text.find("# ")
     if idx > 0:
         return text[idx:].strip()

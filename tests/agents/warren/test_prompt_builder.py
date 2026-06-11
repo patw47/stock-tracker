@@ -103,6 +103,40 @@ class TestBuildPromptForN8nSkills:
         assert "Valuation Take" not in result
         assert query in result
 
+    def test_executive_synthesis_includes_strict_output_template(self) -> None:
+        query = "[EXECUTIVE-SYNTHESIS SKILL]\nSynthesize today's market news."
+
+        result = build_prompt(None, query)
+
+        assert "NEVER use # markdown headings" in result
+        assert "🌍 MACRO DU JOUR" in result
+        assert "📊 PORTEFEUILLE" in result
+        assert "👀 WATCHLIST" in result
+        assert "⚠️ ALERTES" in result
+
+    def test_executive_synthesis_macro_is_external_context(self) -> None:
+        query = "[EXECUTIVE-SYNTHESIS SKILL]\nSynthesize today's market news."
+
+        result = build_prompt(None, query)
+
+        assert "EXTERNAL environment" in result
+        assert "NEVER summarize portfolio sectors" in result
+
+    def test_executive_synthesis_hides_reasoning_protocol_sections(self) -> None:
+        query = "[EXECUTIVE-SYNTHESIS SKILL]\nSynthesize today's market news."
+
+        result = build_prompt(None, query)
+
+        assert "REASONING PROTOCOL stays internal" in result
+
+    def test_ticker_watch_does_not_get_briefing_template(self) -> None:
+        query = "[TICKER-WATCH SKILL]\nClassify each ticker as NEW or SKIP."
+
+        result = build_prompt(None, query)
+
+        assert "🌍 MACRO DU JOUR" not in result
+        assert "PORTEFEUILLE" not in result
+
     def test_ticker_watch_uses_json_instruction_not_generic_output(self) -> None:
         query = "[TICKER-WATCH SKILL]\nClassify each ticker as NEW or SKIP."
 

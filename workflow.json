@@ -279,7 +279,8 @@
         "chatId": "1543956122",
         "text": "={{ $json.chunk }}",
         "additionalFields": {
-          "parse_mode": "Markdown"
+          "parse_mode": "Markdown",
+          "appendAttribution": false
         }
       },
       "id": "node-telegram",
