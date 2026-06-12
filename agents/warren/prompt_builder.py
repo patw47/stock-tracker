@@ -125,6 +125,29 @@ the requested format.""",
     )
 )
 
+_N8N_MACRO_BRIEF_OUTPUT_RULES = """\
+=== N8N SKILL OUTPUT RULES ===
+The user query contains the [MACRO-BRIEF SKILL] pipeline marker.
+Write a daily Market Context Brief in French using EXACTLY these rules:
+
+FORMAT RULES (non-negotiable):
+1. Pure flowing prose — NO bullet lists, NO tables, NO markdown.
+2. NEVER use # headings (no #, ##, ###). No bold **headers** either.
+3. Maximum 5 numerical values total in the entire brief (e.g. VIX, IWM variation, \
+Fear & Greed score). All other data must be described qualitatively.
+4. Length: 150–300 words total.
+5. Signal-first: open with the dominant regime (risk-on / risk-off / neutre) and its \
+main driver.
+6. Rumors and market expectations MUST be explicitly labeled as such \
+(e.g. "selon les attentes du marché", "rumeur non confirmée", "les opérateurs anticipent").
+7. Close with a single-sentence regime conclusion: risk-on, risk-off, or neutre.
+
+CONTENT TO COVER (use "information indisponible" for any missing rubric):
+Fed stance, taux prévus, dollar, pétrole, VIX, IWM / appétit small caps, \
+IPOs notables, secteurs chauds, géopolitique, Fear & Greed, rumeurs.
+
+Never answer NO_REPLY. Degrade gracefully when data is missing."""
+
 
 def _fmt(value: object, suffix: str = "") -> str:
     if value is None:
@@ -235,7 +258,83 @@ def _render_macro(macro: MacroContext) -> str:
 
 
 def _is_n8n_skill_query(query: str) -> bool:
-    return "[TICKER-WATCH SKILL]" in query or "[EXECUTIVE-SYNTHESIS SKILL]" in query
+    return (
+        "[TICKER-WATCH SKILL]" in query
+        or "[EXECUTIVE-SYNTHESIS SKILL]" in query
+        or "[MACRO-BRIEF SKILL]" in query
+    )
+
+
+def _render_macro_brief_context(
+    macro_context: MacroContext | None,
+    macro_snapshot: MacroSnapshot | None,
+    market_closes: dict | None,
+    briefing_date: str | None = None,
+) -> str:
+    """Render combined quantitative + qualitative context for the macro brief prompt."""
+    date_str = briefing_date or "aujourd'hui"
+    lines = [f"=== MACRO BRIEF CONTEXT — {date_str} ==="]
+
+    if macro_context is not None:
+        lines += [
+            "",
+            "--- Données quantitatives FRED ---",
+            f"Fed Funds Rate     : {_fmt(macro_context.policy_rate, '%')}",
+            f"10Y Treasury       : {_fmt(macro_context.ten_year_yield, '%')}{_interpret_10y(macro_context.ten_year_yield)}",
+            f"2Y Treasury        : {_fmt(macro_context.two_year_yield, '%')}",
+            f"10Y-2Y Spread      : {_fmt(macro_context.yield_curve_spread_10y2y, '%')}{_interpret_yield_spread(macro_context.yield_curve_spread_10y2y)}",
+            f"VIX                : {_fmt(macro_context.vix)}{_interpret_vix(macro_context.vix)}",
+            f"Dollar Index       : {_fmt(macro_context.dollar_index)}",
+            f"S&P 500            : {_fmt(macro_context.spx_level)} ({_fmt(macro_context.spx_pct_change_1m, '% 1m')})",
+        ]
+
+    if market_closes:
+        iwm_close = market_closes.get("iwm_close")
+        iwm_pct = market_closes.get("iwm_pct_1d")
+        oil_close = market_closes.get("oil_close")
+        oil_pct = market_closes.get("oil_pct_1d")
+        if iwm_close is not None or oil_close is not None:
+            lines += ["", "--- Marchés quasi-réel ---"]
+        if iwm_close is not None:
+            iwm_pct_str = f" ({iwm_pct:+.2f}% j/j)" if iwm_pct is not None else ""
+            lines.append(f"IWM (small caps)   : {iwm_close:.2f}{iwm_pct_str}")
+        if oil_close is not None:
+            oil_pct_str = f" ({oil_pct:+.2f}% j/j)" if oil_pct is not None else ""
+            lines.append(f"Crude Oil WTI      : {oil_close:.2f}{oil_pct_str}")
+
+    if macro_snapshot is not None:
+        lines += [
+            "",
+            "--- Signaux qualitatifs (web search) ---",
+            f"Fed stance         : {macro_snapshot.fed_stance}",
+            f"Dollar             : {macro_snapshot.dollar_signal}",
+            f"Géopolitique       : {macro_snapshot.geopolitical_notes}",
+            f"Ambiance générale  : {macro_snapshot.overall_sentiment}",
+        ]
+        if macro_snapshot.rate_expectations:
+            lines.append(f"Attentes de taux   : {macro_snapshot.rate_expectations}")
+        if macro_snapshot.ipos:
+            lines.append(f"IPOs notables      : {macro_snapshot.ipos}")
+        if macro_snapshot.hot_sectors:
+            lines.append(f"Secteurs chauds    : {macro_snapshot.hot_sectors}")
+        if macro_snapshot.fear_greed:
+            lines.append(f"Fear & Greed       : {macro_snapshot.fear_greed}")
+        if macro_snapshot.notable_rumors:
+            lines.append(f"Rumeurs (non conf.): {macro_snapshot.notable_rumors}")
+        if macro_snapshot.upcoming_events:
+            events_str = "; ".join(
+                f"{e.name} ({e.date})" for e in macro_snapshot.upcoming_events
+            )
+            lines.append(f"Évènements à venir : {events_str}")
+    else:
+        lines += [
+            "",
+            "--- Signaux qualitatifs indisponibles ---",
+            "(La recherche web a échoué. Rédiger le brief sur la base des données "
+            "quantitatives uniquement, avec mention explicite de l'incertitude.)",
+        ]
+
+    return "\n".join(lines)
 
 
 def build_prompt(
@@ -244,6 +343,7 @@ def build_prompt(
     *,
     macro_snapshot: MacroSnapshot | None = None,
     briefing_date: str | None = None,
+    market_closes: dict | None = None,
 ) -> str:
     """Assemble the full prompt for a Warren LLM call.
 
@@ -256,10 +356,16 @@ def build_prompt(
         output_rules = _N8N_SKILL_OUTPUT_RULES
     elif "[EXECUTIVE-SYNTHESIS SKILL]" in query:
         output_rules = _N8N_SYNTHESIS_OUTPUT_RULES
+    elif "[MACRO-BRIEF SKILL]" in query:
+        output_rules = _N8N_MACRO_BRIEF_OUTPUT_RULES
     else:
         output_rules = _OUTPUT_STRUCTURE
     parts = [_SYSTEM_PERSONA, output_rules]
-    if macro_snapshot is not None:
+    if "[MACRO-BRIEF SKILL]" in query:
+        parts.append(
+            _render_macro_brief_context(macro_context, macro_snapshot, market_closes, briefing_date)
+        )
+    elif macro_snapshot is not None:
         parts.append(_render_macro_snapshot(macro_snapshot, briefing_date))
     elif macro_context is not None:
         parts.append(_render_macro(macro_context))

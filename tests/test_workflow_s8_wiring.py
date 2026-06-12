@@ -109,3 +109,40 @@ def test_deploy_trigger_exercises_news_and_eod_branches() -> None:
         "Read Tickers",
         "Run EOD Anomaly Pipeline S0-S7",
     ]
+
+
+def test_macro_brief_schedule_wired_to_telegram() -> None:
+    """Macro Brief schedule triggers independently and flows to Telegram."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    schedule = nodes["Macro Brief Schedule 16h Mon-Fri"]
+    assert schedule["parameters"]["rule"]["interval"][0]["expression"] == "0 16 * * 1-5"
+    assert schedule["parameters"]["timezone"] == "Europe/Paris"
+
+    assert _edge_targets(workflow, "Macro Brief Schedule 16h Mon-Fri") == [
+        "Call Warren Macro Brief"
+    ]
+    assert _edge_targets(workflow, "Call Warren Macro Brief") == ["Extract Macro Brief"]
+    assert _edge_targets(workflow, "Extract Macro Brief") == ["Aggregate for Telegram"]
+
+    # Macro brief path must NOT contain Layer A news nodes (independent pipeline)
+    reachable = _reachable(workflow, "Macro Brief Schedule 16h Mon-Fri")
+    assert "Read Tickers" not in reachable
+    assert "Claude Haiku API" not in reachable
+    assert "If New Items" not in reachable
+
+    # Must reach Telegram
+    assert "Aggregate for Telegram" in reachable
+    assert "Split for Telegram" in reachable
+    assert "Send Telegram" in reachable
+
+
+def test_macro_brief_call_targets_correct_endpoint() -> None:
+    """Call Warren Macro Brief node POSTs to /macro-brief."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    call_node = nodes["Call Warren Macro Brief"]
+    assert call_node["type"] == "n8n-nodes-base.httpRequest"
+    assert "/macro-brief" in call_node["parameters"]["url"]

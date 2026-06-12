@@ -192,7 +192,12 @@ _EXTRACT_PROMPT = """Based on the macro context above, return a JSON object with
   "dollar_signal": "short qualitative description of USD direction, no percentages",
   "geopolitical_notes": "summary of active geopolitical risks, no percentages",
   "overall_sentiment": "risk-on" or "risk-off" or "neutral",
-  "upcoming_events": [{"name": "event name", "date": "YYYY-MM-DD or descriptive date"}]
+  "upcoming_events": [{"name": "event name", "date": "YYYY-MM-DD or descriptive date"}],
+  "rate_expectations": "qualitative FedWatch-style description of market rate expectations (cuts or hikes expected), no percentages — null if unknown",
+  "ipos": "recent or upcoming notable IPOs and their sector — null if none found",
+  "hot_sectors": "sectors showing notable momentum or investor interest today — null if unclear",
+  "fear_greed": "Fear & Greed index numeric value or qualitative reading if mentioned — null if not found",
+  "notable_rumors": "notable unconfirmed market rumors, each prefixed with RUMEUR: — null if none"
 }
 Return ONLY valid JSON, no other text."""
 
@@ -252,12 +257,21 @@ def _extract_snapshot_from_text(context_text: str) -> MacroSnapshot:
         if isinstance(e, dict) and "name" in e and "date" in e
     ]
 
+    def _safe_str(key: str) -> str | None:
+        val = raw.get(key)
+        return str(val).strip() if val and str(val).strip() else None
+
     return MacroSnapshot(
         fed_stance=raw.get("fed_stance", "neutral"),
         dollar_signal=dollar_signal,
         geopolitical_notes=geopolitical_notes,
         overall_sentiment=raw.get("overall_sentiment", "neutral"),
         upcoming_events=upcoming_events,
+        rate_expectations=_safe_str("rate_expectations"),
+        ipos=_safe_str("ipos"),
+        hot_sectors=_safe_str("hot_sectors"),
+        fear_greed=_safe_str("fear_greed"),
+        notable_rumors=_safe_str("notable_rumors"),
     )
 
 
@@ -270,3 +284,44 @@ async def fetch_macro_snapshot() -> MacroSnapshot:
     """
     context_text = _search_macro_raw()
     return _extract_snapshot_from_text(context_text)
+
+
+def get_market_closes() -> dict[str, float | None]:
+    """Fetch IWM and crude oil last close + daily pct change via yfinance."""
+    result: dict[str, float | None] = {
+        "iwm_close": None,
+        "iwm_pct_1d": None,
+        "oil_close": None,
+        "oil_pct_1d": None,
+    }
+    try:
+        import yfinance as yf  # already a project dependency
+        for key_prefix, ticker in (("iwm", "IWM"), ("oil", "CL=F")):
+            try:
+                hist = yf.download(
+                    ticker,
+                    period="5d",
+                    interval="1d",
+                    progress=False,
+                    auto_adjust=True,
+                )
+                if hist.empty:
+                    continue
+                if isinstance(hist.columns, __import__("pandas").MultiIndex):
+                    hist.columns = hist.columns.droplevel(1)
+                if "Close" not in hist.columns:
+                    continue
+                closes = hist["Close"].dropna()
+                if len(closes) < 1:
+                    continue
+                last = float(closes.iloc[-1])
+                result[f"{key_prefix}_close"] = last
+                if len(closes) >= 2:
+                    result[f"{key_prefix}_pct_1d"] = round(
+                        (closes.iloc[-1] / closes.iloc[-2] - 1) * 100, 2
+                    )
+            except Exception as exc:
+                logger.warning("yfinance fetch failed for %s: %s", ticker, exc)
+    except ImportError:
+        logger.warning("yfinance not available; skipping market closes")
+    return result
