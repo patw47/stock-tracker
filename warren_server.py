@@ -1,34 +1,36 @@
 #!/usr/bin/env python3
 """
 Warren HTTP bridge for n8n.
-POST /filter     -- ticker-watch: classify tickers as NEW vs SKIP
-POST /synthesize -- executive-synthesis: markdown briefing + write memory
+POST /filter      -- ticker-watch: classify tickers as NEW vs SKIP
+POST /synthesize  -- executive-synthesis: markdown briefing + write memory
+POST /memorize    -- silent memory write for NEW tickers only, no synthesis
+POST /macro-brief -- daily Market Context Brief (independent of ticker news)
 """
 from __future__ import annotations
 
-from collections.abc import Awaitable
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import asyncio
 import datetime
-import inspect
 import json
 import logging
 import os
 import subprocess
 import threading
 import time
-from typing import cast
 
 try:
-    from agents.warren.macro_provider import MacroProvider
-except ImportError:
-    MacroProvider = None
-
-try:
-    from agents.warren.macro_provider import get_snapshot, fetch_macro_snapshot
+    from agents.warren.macro_provider import get_snapshot, fetch_macro_snapshot, get_market_closes
 except ImportError:
     get_snapshot = None
     fetch_macro_snapshot = None
+    get_market_closes = None
+
+try:
+    from market_intelligence.sector_rotation import get_sector_rotation
+    from market_intelligence.fear_greed import get_fear_greed
+except ImportError:
+    get_sector_rotation = None  # type: ignore[assignment]
+    get_fear_greed = None  # type: ignore[assignment]
 
 try:
     from agents.warren.models import MacroContext
@@ -36,9 +38,9 @@ try:
 except ImportError:
     from agents.warren.models import MacroContext
 
-    def build_prompt(macro_context: MacroContext | None, query: str) -> str:
+    def build_prompt(macro_context: MacroContext | None, query: str, **kwargs: object) -> str:
         """Preserve existing prompt text when the prompt builder is unavailable."""
-        _ = macro_context
+        _ = macro_context, kwargs
         return query
 
 
@@ -85,26 +87,9 @@ def call_warren(message, tag):
     return r.stdout.strip()
 
 
-def _resolve_macro_result(
-    result: MacroContext | Awaitable[MacroContext | None] | None,
-) -> MacroContext | None:
-    """Resolve sync or async macro-provider results."""
-    if inspect.isawaitable(result):
-        return asyncio.run(cast(Awaitable[MacroContext | None], result))
-    return result
-
-
 def fetch_macro_context() -> MacroContext | None:
     """Return macro context for Warren while keeping the HTTP bridge available."""
     try:
-        if MacroProvider is not None:
-            provider = MacroProvider()
-            if callable(provider):
-                return _resolve_macro_result(provider())
-            if hasattr(provider, "fetch"):
-                return _resolve_macro_result(provider.fetch())
-            logger.warning("MacroProvider is not callable and has no fetch method")
-            return None
         if get_snapshot is not None:
             return get_snapshot()
         logger.warning("No macro provider hook is available")
@@ -207,6 +192,10 @@ class Handler(BaseHTTPRequestHandler):
             resp = self.handle_filter(body)
         elif self.path == "/synthesize":
             resp = self.handle_synthesize(body)
+        elif self.path == "/memorize":
+            resp = self.handle_memorize(body)
+        elif self.path == "/macro-brief":
+            resp = self.handle_macro_brief(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -324,6 +313,92 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             synthesis = f"Synthesis error: {e}"
         return json.dumps({"synthesis": synthesis})
+
+    def handle_memorize(self, body: dict) -> str:
+        """Write memory for NEW tickers only; no Warren call, no synthesis."""
+        new_tickers = body.get("newTickers", [])
+        all_news = body.get("allNews", {})
+        today = datetime.date.today().isoformat()
+        written: list[str] = []
+        for sym in new_tickers:
+            text = all_news.get(sym, "")
+            write_memory(sym, text.strip() if text else "", today)
+            written.append(sym)
+        return json.dumps({"status": "ok", "written": written})
+
+    def handle_macro_brief(self, body: dict) -> str:
+        """Build and return daily Market Context Brief, independent of ticker news."""
+        today = datetime.date.today().isoformat()
+
+        macro_context: MacroContext | None = None
+        if get_snapshot is not None:
+            try:
+                macro_context = get_snapshot()
+            except Exception as exc:
+                logger.warning("get_snapshot failed for macro brief: %s", exc)
+
+        market_closes: dict | None = None
+        if get_market_closes is not None:
+            try:
+                market_closes = get_market_closes()
+            except Exception as exc:
+                logger.warning("get_market_closes failed: %s", exc)
+
+        macro_snapshot = None
+        if fetch_macro_snapshot is not None:
+            try:
+                macro_snapshot = asyncio.run(fetch_macro_snapshot())
+            except Exception as exc:
+                logger.warning("fetch_macro_snapshot failed for macro brief: %s", exc)
+
+        sector_data: dict | None = None
+        if get_sector_rotation is not None:
+            try:
+                result = get_sector_rotation()
+                sector_data = {
+                    "entering": [
+                        (s.ticker, s.name, s.rel_perf_1d) for s in result.entering
+                    ],
+                    "exiting": [
+                        (s.ticker, s.name, s.rel_perf_1d) for s in result.exiting
+                    ],
+                    "iwm_rel_1d": result.iwm_rel_1d,
+                    "small_caps_trend": result.small_caps_trend,
+                }
+                if result.data_issues:
+                    logger.info("sector_rotation data_issues: %s", result.data_issues)
+            except Exception as exc:
+                logger.warning("get_sector_rotation failed: %s", exc)
+
+        fear_greed_data: dict | None = None
+        if get_fear_greed is not None:
+            try:
+                fg = get_fear_greed()
+                if fg is not None:
+                    fear_greed_data = {"score": fg.score, "label": fg.label}
+            except Exception as exc:
+                logger.warning("get_fear_greed failed: %s", exc)
+
+        query = f"[MACRO-BRIEF SKILL]\nDATE: {today}\n"
+        try:
+            prompt = build_prompt(
+                macro_context,
+                query,
+                macro_snapshot=macro_snapshot,
+                briefing_date=today,
+                market_closes=market_closes,
+                sector_data=sector_data,
+                fear_greed_data=fear_greed_data,
+            )
+            stdout = call_warren(prompt, "macro-brief")
+            brief = extract_inner(stdout).strip()
+            if not brief:
+                brief = "Données macro insuffisantes pour le brief d'aujourd'hui."
+        except Exception as exc:
+            logger.error("handle_macro_brief failed: %s", exc)
+            brief = f"Erreur lors de la génération du brief macro : {exc}"
+
+        return json.dumps({"brief": brief})
 
     def log_message(self, *_):
         """Silence default HTTPServer request logging."""

@@ -43,10 +43,44 @@ def test_legacy_warren_news_layer_remains_connected() -> None:
     assert _edge_targets(workflow, "Read Tickers") == ["Prepare Haiku Request"]
     assert _edge_targets(workflow, "Claude Haiku API") == ["Extract Raw News"]
     assert _edge_targets(workflow, "Call Warren Filter") == ["Extract Filter Result"]
-    assert _edge_targets(workflow, "Call Warren Synthesis") == [
-        "Extract Warren Synthesis"
-    ]
+    assert _edge_targets(workflow, "If New Items", output_index=0) == ["Call Memorize"]
+    assert _edge_targets(workflow, "If New Items", output_index=1) == []
     assert _edge_targets(workflow, "Split for Telegram") == ["Send Telegram"]
+
+
+def test_layer_a_synthesis_nodes_removed() -> None:
+    """Sprint 2: synthesis chain and Layer A → Telegram link must not exist."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    assert "Prepare Warren Synthesis" not in nodes
+    assert "Call Warren Synthesis" not in nodes
+    assert "Extract Warren Synthesis" not in nodes
+    assert "Call Memorize" in nodes
+
+    connections = workflow["connections"]
+    assert "Prepare Warren Synthesis" not in connections
+    assert "Call Warren Synthesis" not in connections
+    assert "Extract Warren Synthesis" not in connections
+    assert "/synthesize" not in json.dumps(connections)
+
+
+def test_layer_a_does_not_reach_telegram() -> None:
+    """Layer A true branch (If New Items) must not reach Telegram nodes."""
+    workflow = _workflow()
+    layer_a_true_reachable = _reachable(workflow, "If New Items")
+    assert "Aggregate for Telegram" not in layer_a_true_reachable
+    assert "Split for Telegram" not in layer_a_true_reachable
+    assert "Send Telegram" not in layer_a_true_reachable
+
+
+def test_call_memorize_targets_correct_endpoint() -> None:
+    """Call Memorize node POSTs to /memorize."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+    node = nodes["Call Memorize"]
+    assert node["type"] == "n8n-nodes-base.httpRequest"
+    assert "/memorize" in node["parameters"]["url"]
 
 
 def test_eod_branch_uses_registry_runner_and_reuses_telegram_nodes() -> None:
@@ -109,3 +143,40 @@ def test_deploy_trigger_exercises_news_and_eod_branches() -> None:
         "Read Tickers",
         "Run EOD Anomaly Pipeline S0-S7",
     ]
+
+
+def test_macro_brief_schedule_wired_to_telegram() -> None:
+    """Macro Brief schedule triggers independently and flows to Telegram."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    schedule = nodes["Macro Brief Schedule 16h Mon-Fri"]
+    assert schedule["parameters"]["rule"]["interval"][0]["expression"] == "0 16 * * 1-5"
+    assert schedule["parameters"]["timezone"] == "Europe/Paris"
+
+    assert _edge_targets(workflow, "Macro Brief Schedule 16h Mon-Fri") == [
+        "Call Warren Macro Brief"
+    ]
+    assert _edge_targets(workflow, "Call Warren Macro Brief") == ["Extract Macro Brief"]
+    assert _edge_targets(workflow, "Extract Macro Brief") == ["Aggregate for Telegram"]
+
+    # Macro brief path must NOT contain Layer A news nodes (independent pipeline)
+    reachable = _reachable(workflow, "Macro Brief Schedule 16h Mon-Fri")
+    assert "Read Tickers" not in reachable
+    assert "Claude Haiku API" not in reachable
+    assert "If New Items" not in reachable
+
+    # Must reach Telegram
+    assert "Aggregate for Telegram" in reachable
+    assert "Split for Telegram" in reachable
+    assert "Send Telegram" in reachable
+
+
+def test_macro_brief_call_targets_correct_endpoint() -> None:
+    """Call Warren Macro Brief node POSTs to /macro-brief."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    call_node = nodes["Call Warren Macro Brief"]
+    assert call_node["type"] == "n8n-nodes-base.httpRequest"
+    assert "/macro-brief" in call_node["parameters"]["url"]

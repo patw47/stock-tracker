@@ -32,8 +32,10 @@ stock-tracker/
 │   └── data/                  # registry.json, quarantine.json, alert/dedup/short thresholds,
 │                              #   sector_factors.json (IWM + sector ETF mapping)
 ├── skills/                    # OpenClaw skill sources (synced to the Warren workspace)
-│   ├── modifyportfolio/
-│   └── modifywatchlist/
+│   ├── modifyportfolio/       # Telegram: add/remove portfolio tickers
+│   ├── modifywatchlist/       # Telegram: add/remove watchlist tickers
+│   ├── macrobrief/            # n8n 16h: Market Context Brief quotidien
+│   └── tickerbrief/           # Telegram: brief à la demande sur un ticker précis (lecture seule)
 ├── tests/                     # pytest — agents/warren, market_intelligence, workflow wiring
 ├── docs/                      # this file, deployement.md, ticker-files-schema.md
 ├── deploy/                    # CI/CD: remote.sh (runs on VPS) + import_workflow.py (sqlite upsert)
@@ -49,7 +51,8 @@ stock-tracker/
 │   ├── ticker-watch/          # Filter skill (NEW vs SKIP)
 │   ├── executive-synthesis/   # Synthesis skill (French briefing, signal-first, no # headings)
 │   ├── modifyportfolio/       # Telegram portfolio management
-│   └── modifywatchlist/       # Telegram watchlist management
+│   ├── modifywatchlist/       # Telegram watchlist management
+│   └── tickerbrief/           # Telegram on-demand ticker brief (read-only)
 └── memory/
     └── tickers/               # SYMBOL.md — last 3 raw news entries (read by both layers)
 ```

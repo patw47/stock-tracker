@@ -116,3 +116,23 @@ class MacroSnapshot(BaseModel):
     )
     overall_sentiment: Literal["risk-on", "risk-off", "neutral"]
     upcoming_events: list[UpcomingEvent]
+    rate_expectations: str | None = Field(
+        default=None,
+        description="Qualitative FedWatch-style rate expectations (cuts/hikes), no percentages.",
+    )
+    ipos: str | None = Field(
+        default=None,
+        description="Recent or upcoming notable IPOs.",
+    )
+    hot_sectors: str | None = Field(
+        default=None,
+        description="Sectors showing notable momentum or investor interest.",
+    )
+    fear_greed: str | None = Field(
+        default=None,
+        description="Fear & Greed index value or qualitative reading if available.",
+    )
+    notable_rumors: str | None = Field(
+        default=None,
+        description="Notable unconfirmed market rumors, explicitly labeled as such.",
+    )
