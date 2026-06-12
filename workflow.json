@@ -194,21 +194,8 @@
     },
     {
       "parameters": {
-        "jsCode": "const { newTickers, allNews } = $json;\nconst newNews = {};\nfor (const sym of (newTickers || [])) {\n  newNews[sym] = allNews[sym] || '';\n}\nreturn [{ json: { news: newNews } }];"
-      },
-      "id": "node-prep-synth",
-      "name": "Prepare Warren Synthesis",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        2220,
-        300
-      ]
-    },
-    {
-      "parameters": {
         "method": "POST",
-        "url": "http://127.0.0.1:18795/synthesize",
+        "url": "http://127.0.0.1:18795/memorize",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -220,29 +207,16 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ news: $json.news }) }}",
+        "jsonBody": "={{ JSON.stringify({ newTickers: $json.newTickers, allNews: $json.allNews }) }}",
         "options": {}
       },
-      "id": "node-call-synth",
-      "name": "Call Warren Synthesis",
+      "id": "node-call-memorize",
+      "name": "Call Memorize",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
+      "continueOnFail": true,
       "position": [
-        2440,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $input.first().json;\nlet warrenText = '';\nif (typeof data.synthesis === 'string') {\n  warrenText = data.synthesis.trim();\n} else if (data.error) {\n  warrenText = \"Erreur de synthèse Warren : \" + data.error;\n}\nif (!warrenText) {\n  warrenText = \"Aucune actualité pertinente aujourd'hui.\";\n}\nreturn [{ json: { warrenText } }];",
-        "mode": "runOnceForAllItems"
-      },
-      "id": "node-extract-synth",
-      "name": "Extract Warren Synthesis",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        2660,
+        2220,
         300
       ]
     },
@@ -558,45 +532,12 @@
       "main": [
         [
           {
-            "node": "Prepare Warren Synthesis",
+            "node": "Call Memorize",
             "type": "main",
             "index": 0
           }
         ],
         []
-      ]
-    },
-    "Prepare Warren Synthesis": {
-      "main": [
-        [
-          {
-            "node": "Call Warren Synthesis",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Call Warren Synthesis": {
-      "main": [
-        [
-          {
-            "node": "Extract Warren Synthesis",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Extract Warren Synthesis": {
-      "main": [
-        [
-          {
-            "node": "Aggregate for Telegram",
-            "type": "main",
-            "index": 0
-          }
-        ]
       ]
     },
     "Aggregate for Telegram": {

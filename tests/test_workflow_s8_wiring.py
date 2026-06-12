@@ -43,10 +43,44 @@ def test_legacy_warren_news_layer_remains_connected() -> None:
     assert _edge_targets(workflow, "Read Tickers") == ["Prepare Haiku Request"]
     assert _edge_targets(workflow, "Claude Haiku API") == ["Extract Raw News"]
     assert _edge_targets(workflow, "Call Warren Filter") == ["Extract Filter Result"]
-    assert _edge_targets(workflow, "Call Warren Synthesis") == [
-        "Extract Warren Synthesis"
-    ]
+    assert _edge_targets(workflow, "If New Items", output_index=0) == ["Call Memorize"]
+    assert _edge_targets(workflow, "If New Items", output_index=1) == []
     assert _edge_targets(workflow, "Split for Telegram") == ["Send Telegram"]
+
+
+def test_layer_a_synthesis_nodes_removed() -> None:
+    """Sprint 2: synthesis chain and Layer A → Telegram link must not exist."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    assert "Prepare Warren Synthesis" not in nodes
+    assert "Call Warren Synthesis" not in nodes
+    assert "Extract Warren Synthesis" not in nodes
+    assert "Call Memorize" in nodes
+
+    connections = workflow["connections"]
+    assert "Prepare Warren Synthesis" not in connections
+    assert "Call Warren Synthesis" not in connections
+    assert "Extract Warren Synthesis" not in connections
+    assert "/synthesize" not in json.dumps(connections)
+
+
+def test_layer_a_does_not_reach_telegram() -> None:
+    """Layer A true branch (If New Items) must not reach Telegram nodes."""
+    workflow = _workflow()
+    layer_a_true_reachable = _reachable(workflow, "If New Items")
+    assert "Aggregate for Telegram" not in layer_a_true_reachable
+    assert "Split for Telegram" not in layer_a_true_reachable
+    assert "Send Telegram" not in layer_a_true_reachable
+
+
+def test_call_memorize_targets_correct_endpoint() -> None:
+    """Call Memorize node POSTs to /memorize."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+    node = nodes["Call Memorize"]
+    assert node["type"] == "n8n-nodes-base.httpRequest"
+    assert "/memorize" in node["parameters"]["url"]
 
 
 def test_eod_branch_uses_registry_runner_and_reuses_telegram_nodes() -> None:

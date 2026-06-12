@@ -3,6 +3,7 @@
 Warren HTTP bridge for n8n.
 POST /filter      -- ticker-watch: classify tickers as NEW vs SKIP
 POST /synthesize  -- executive-synthesis: markdown briefing + write memory
+POST /memorize    -- silent memory write for NEW tickers only, no synthesis
 POST /macro-brief -- daily Market Context Brief (independent of ticker news)
 """
 from __future__ import annotations
@@ -184,6 +185,8 @@ class Handler(BaseHTTPRequestHandler):
             resp = self.handle_filter(body)
         elif self.path == "/synthesize":
             resp = self.handle_synthesize(body)
+        elif self.path == "/memorize":
+            resp = self.handle_memorize(body)
         elif self.path == "/macro-brief":
             resp = self.handle_macro_brief(body)
         else:
@@ -303,6 +306,18 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             synthesis = f"Synthesis error: {e}"
         return json.dumps({"synthesis": synthesis})
+
+    def handle_memorize(self, body: dict) -> str:
+        """Write memory for NEW tickers only; no Warren call, no synthesis."""
+        new_tickers = body.get("newTickers", [])
+        all_news = body.get("allNews", {})
+        today = datetime.date.today().isoformat()
+        written: list[str] = []
+        for sym in new_tickers:
+            text = all_news.get(sym, "")
+            write_memory(sym, text.strip() if text else "", today)
+            written.append(sym)
+        return json.dumps({"status": "ok", "written": written})
 
     def handle_macro_brief(self, body: dict) -> str:
         """Build and return daily Market Context Brief, independent of ticker news."""
