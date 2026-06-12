@@ -26,6 +26,13 @@ except ImportError:
     get_market_closes = None
 
 try:
+    from market_intelligence.sector_rotation import get_sector_rotation
+    from market_intelligence.fear_greed import get_fear_greed
+except ImportError:
+    get_sector_rotation = None  # type: ignore[assignment]
+    get_fear_greed = None  # type: ignore[assignment]
+
+try:
     from agents.warren.models import MacroContext
     from agents.warren.prompt_builder import build_prompt
 except ImportError:
@@ -344,6 +351,34 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 logger.warning("fetch_macro_snapshot failed for macro brief: %s", exc)
 
+        sector_data: dict | None = None
+        if get_sector_rotation is not None:
+            try:
+                result = get_sector_rotation()
+                sector_data = {
+                    "entering": [
+                        (s.ticker, s.name, s.rel_perf_1d) for s in result.entering
+                    ],
+                    "exiting": [
+                        (s.ticker, s.name, s.rel_perf_1d) for s in result.exiting
+                    ],
+                    "iwm_rel_1d": result.iwm_rel_1d,
+                    "small_caps_trend": result.small_caps_trend,
+                }
+                if result.data_issues:
+                    logger.info("sector_rotation data_issues: %s", result.data_issues)
+            except Exception as exc:
+                logger.warning("get_sector_rotation failed: %s", exc)
+
+        fear_greed_data: dict | None = None
+        if get_fear_greed is not None:
+            try:
+                fg = get_fear_greed()
+                if fg is not None:
+                    fear_greed_data = {"score": fg.score, "label": fg.label}
+            except Exception as exc:
+                logger.warning("get_fear_greed failed: %s", exc)
+
         query = f"[MACRO-BRIEF SKILL]\nDATE: {today}\n"
         try:
             prompt = build_prompt(
@@ -352,6 +387,8 @@ class Handler(BaseHTTPRequestHandler):
                 macro_snapshot=macro_snapshot,
                 briefing_date=today,
                 market_closes=market_closes,
+                sector_data=sector_data,
+                fear_greed_data=fear_greed_data,
             )
             stdout = call_warren(prompt, "macro-brief")
             brief = extract_inner(stdout).strip()

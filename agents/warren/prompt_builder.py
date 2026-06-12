@@ -146,6 +146,18 @@ CONTENT TO COVER (use "information indisponible" for any missing rubric):
 Fed stance, taux prévus, dollar, pétrole, VIX, IWM / appétit small caps, \
 IPOs notables, secteurs chauds, géopolitique, Fear & Greed, rumeurs.
 
+SECTOR ROTATION DATA (when "--- Rotation sectorielle ---" section is present):
+- Translate entering/exiting sectors into flowing French prose describing capital flows.
+  NEVER mention ETF tickers (XLE, NUKZ, XBI…) in the final brief — use French sector names only.
+  NEVER list percentages — convert to directional language.
+  Examples: "l'argent tourne vers l'énergie et le nucléaire", "la biotechnologie marque le pas",
+  "les small caps surperforment le marché large, signe d'appétit pour le risque".
+
+FEAR & GREED DATA (when "--- Fear & Greed CNN ---" section is present):
+- The CNN score is the authoritative source; use it as one of the 5 allowed numerical values.
+  Format: "l'indice Fear & Greed CNN pointe à 38 (Fear), témoignant d'une certaine prudence".
+  Prefer this structured score over any qualitative fear/greed mention from web-search data.
+
 Never answer NO_REPLY. Degrade gracefully when data is missing."""
 
 
@@ -265,11 +277,62 @@ def _is_n8n_skill_query(query: str) -> bool:
     )
 
 
+def _render_sector_data(sector_data: dict) -> list[str]:
+    """Format structured sector rotation data for the brief context."""
+    lines: list[str] = ["", "--- Rotation sectorielle (calculé, zéro LLM) ---"]
+    entering = sector_data.get("entering", [])
+    exiting = sector_data.get("exiting", [])
+    iwm_rel = sector_data.get("iwm_rel_1d")
+    trend = sector_data.get("small_caps_trend", "neutre")
+
+    if entering:
+        parts = []
+        for item in entering:
+            ticker, name, rel = item
+            rel_str = f"{rel:+.2f}% vs SPY" if rel is not None else "N/A"
+            parts.append(f"{name} ({rel_str})")
+        lines.append(f"Entrants 1j        : {', '.join(parts)}")
+    else:
+        lines.append("Entrants 1j        : données insuffisantes")
+
+    if exiting:
+        parts = []
+        for item in exiting:
+            ticker, name, rel = item
+            rel_str = f"{rel:+.2f}% vs SPY" if rel is not None else "N/A"
+            parts.append(f"{name} ({rel_str})")
+        lines.append(f"Sortants 1j        : {', '.join(parts)}")
+    else:
+        lines.append("Sortants 1j        : données insuffisantes")
+
+    if iwm_rel is not None:
+        lines.append(f"IWM vs SPY 1j      : {iwm_rel:+.2f}% → small caps {trend}")
+    else:
+        lines.append(f"Small caps         : {trend}")
+
+    return lines
+
+
+def _render_fear_greed_data(fear_greed_data: dict) -> list[str]:
+    """Format structured CNN Fear & Greed data for the brief context."""
+    score = fear_greed_data.get("score")
+    label = fear_greed_data.get("label", "")
+    if score is None:
+        return []
+    return [
+        "",
+        "--- Fear & Greed CNN (structuré) ---",
+        f"Score              : {score} ({label})",
+    ]
+
+
 def _render_macro_brief_context(
     macro_context: MacroContext | None,
     macro_snapshot: MacroSnapshot | None,
     market_closes: dict | None,
     briefing_date: str | None = None,
+    sector_data: dict | None = None,
+    fear_greed_data: dict | None = None,
 ) -> str:
     """Render combined quantitative + qualitative context for the macro brief prompt."""
     date_str = briefing_date or "aujourd'hui"
@@ -315,9 +378,11 @@ def _render_macro_brief_context(
             lines.append(f"Attentes de taux   : {macro_snapshot.rate_expectations}")
         if macro_snapshot.ipos:
             lines.append(f"IPOs notables      : {macro_snapshot.ipos}")
-        if macro_snapshot.hot_sectors:
+        # Suppress qualitative hot_sectors when structured sector_data is present
+        if macro_snapshot.hot_sectors and sector_data is None:
             lines.append(f"Secteurs chauds    : {macro_snapshot.hot_sectors}")
-        if macro_snapshot.fear_greed:
+        # Suppress qualitative fear_greed when structured CNN data is present
+        if macro_snapshot.fear_greed and fear_greed_data is None:
             lines.append(f"Fear & Greed       : {macro_snapshot.fear_greed}")
         if macro_snapshot.notable_rumors:
             lines.append(f"Rumeurs (non conf.): {macro_snapshot.notable_rumors}")
@@ -334,6 +399,12 @@ def _render_macro_brief_context(
             "quantitatives uniquement, avec mention explicite de l'incertitude.)",
         ]
 
+    if sector_data is not None:
+        lines += _render_sector_data(sector_data)
+
+    if fear_greed_data is not None:
+        lines += _render_fear_greed_data(fear_greed_data)
+
     return "\n".join(lines)
 
 
@@ -344,6 +415,8 @@ def build_prompt(
     macro_snapshot: MacroSnapshot | None = None,
     briefing_date: str | None = None,
     market_closes: dict | None = None,
+    sector_data: dict | None = None,
+    fear_greed_data: dict | None = None,
 ) -> str:
     """Assemble the full prompt for a Warren LLM call.
 
@@ -351,6 +424,8 @@ def build_prompt(
     When both are None the macro section is omitted.
     New callers should prefer macro_snapshot + briefing_date; macro_context
     remains supported until warren-orchestration-wiring migrates.
+    sector_data and fear_greed_data inject structured Sprint 3 quantitative
+    data into the macro-brief context; they are ignored for other skills.
     """
     if "[TICKER-WATCH SKILL]" in query:
         output_rules = _N8N_SKILL_OUTPUT_RULES
@@ -363,7 +438,14 @@ def build_prompt(
     parts = [_SYSTEM_PERSONA, output_rules]
     if "[MACRO-BRIEF SKILL]" in query:
         parts.append(
-            _render_macro_brief_context(macro_context, macro_snapshot, market_closes, briefing_date)
+            _render_macro_brief_context(
+                macro_context,
+                macro_snapshot,
+                market_closes,
+                briefing_date,
+                sector_data=sector_data,
+                fear_greed_data=fear_greed_data,
+            )
         )
     elif macro_snapshot is not None:
         parts.append(_render_macro_snapshot(macro_snapshot, briefing_date))
