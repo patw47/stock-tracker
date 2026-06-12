@@ -20,7 +20,8 @@ The Macro Brief answers *"what is the market doing today?"*. Layer A silently ma
 Macro Brief Schedule 16h Mon-Fri (Europe/Paris)
          │
          ▼
-  POST /macro-brief (warren_server.py — handle_macro_brief)
+  Call Warren Macro Brief — POST /macro-brief
+  (warren_server.py — handle_macro_brief)
          │
          ├─ FRED API (get_snapshot)
          │   Fed Funds, 10Y/2Y rates, VIX, dollar index, S&P 500
@@ -46,6 +47,9 @@ Macro Brief Schedule 16h Mon-Fri (Europe/Paris)
   No bullet points, no tables, no # headings, no bold headers
   Rumors always labeled as rumors
   Closes with one-sentence regime conclusion
+         │
+         ▼
+  Extract Macro Brief
          │
          ▼
   Aggregate for Telegram → Split for Telegram → Send Telegram
@@ -77,12 +81,15 @@ Layer A News Schedule 16h Mon-Fri (Europe/Paris)
   Aggregate all raw news
          │
          ▼
-  Warren Call — ticker-watch  (POST /filter)
+  Call Warren Filter — ticker-watch  (POST /filter)
   Reads memory/tickers/SYMBOL.md (last 3 entries)
   Returns { new: [...], skip: [...] }
          │
+         ▼
+  Extract Filter Result → If New Items
+         │
          ▼ NEW tickers only
-  POST /memorize (handle_memorize)
+  Call Memorize — POST /memorize (handle_memorize)
   Writes memory/tickers/SYMBOL.md for each NEW ticker
   No Warren synthesis call — no Telegram message
 ```
