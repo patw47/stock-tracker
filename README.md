@@ -1,22 +1,69 @@
-# Stock Tracker — Daily AI-Powered Stock Briefing
+# Stock Tracker — Market Context Brief & Anomaly Alerts
 
 Automated stock monitoring system built with **n8n** + **Claude Haiku** + **Warren** (OpenClaw agent) + a **Python anomaly-detection layer** (`market_intelligence/`).
 
-Two independent layers, one Telegram channel:
+Three independent layers, one Telegram channel:
 
 | Layer | What | When | LLM? |
 |---|---|---|---|
-| **A — News** | Web news per ticker → dedup → French executive briefing | 16:00 Paris, Mon–Fri | Haiku (search) + Warren (synthesis) |
+| **Macro Brief** | Daily market context brief — Fed, rates, dollar, oil, VIX, small caps, sectors, geopolitics | 16:00 Paris, Mon–Fri | Haiku (web search) + Warren (prose) |
+| **A — News (silent)** | Web news per ticker → dedup → memory write only, no message | 16:00 Paris, Mon–Fri | Haiku (search) + Warren (filter) |
 | **B — Anomaly detection (EOD)** | Price/volume anomaly scan → beta gate → dedup → targeted Warren explanation | 21:30 UTC, Mon–Fri (after US close) | **Zero LLM in the detection path** — Warren only called for surviving alerts |
 
-Layer A answers *"why"* (news context). Layer B answers *"when"* (something unusual just happened on this stock).
+The Macro Brief answers *"what is the market doing today?"*. Layer A silently maintains the news memory that feeds Layer B context. Layer B answers *"when"* (something unusual just happened on this stock).
 
 ---
 
-## Layer A — News pipeline
+## Macro Brief — Daily Market Context
 
 ```
-Layer A News Schedule (16:00 Paris, Mon–Fri)
+Macro Brief Schedule 16h Mon-Fri (Europe/Paris)
+         │
+         ▼
+  POST /macro-brief (warren_server.py — handle_macro_brief)
+         │
+         ├─ FRED API (get_snapshot)
+         │   Fed Funds, 10Y/2Y rates, VIX, dollar index, S&P 500
+         │
+         ├─ yfinance (get_market_closes)
+         │   IWM close + daily change, WTI crude close + daily change
+         │
+         ├─ Haiku web_search (fetch_macro_snapshot)
+         │   Fed stance, rate expectations/rumors, geopolitics,
+         │   notable IPOs, hot sectors, Fear & Greed, market rumors
+         │
+         ├─ sector_rotation.py (get_sector_rotation) — zero LLM
+         │   Sector ETF relative performance, IWM/SPY ratio,
+         │   small caps appetite trend
+         │
+         └─ fear_greed.py (get_fear_greed) — zero LLM
+             CNN Fear & Greed index (best-effort)
+         │
+         ▼
+  Warren — prose brief 150–300 words
+  Signal-first: opens with dominant regime (risk-on / risk-off / neutral)
+  Max 5 numeric values — Fed, rates, VIX, IWM move, Fear & Greed
+  No bullet points, no tables, no # headings, no bold headers
+  Rumors always labeled as rumors
+  Closes with one-sentence regime conclusion
+         │
+         ▼
+  Aggregate for Telegram → Split for Telegram → Send Telegram
+```
+
+**Graceful degradation** — if one source fails, the brief continues with the remaining data:
+- Web search fails → quantitative FRED data only, brief mentions qualitative uncertainty
+- All FRED sources fail → fallback values + warning
+- Brief is never empty, never crashes
+
+**Estimated cost**: ~$0.02/day (Haiku macro web search + Warren brief call)
+
+---
+
+## Layer A — Silent News Collection
+
+```
+Layer A News Schedule 16h Mon-Fri (Europe/Paris)
          │
          ▼
   Read Tickers — reads portfolio.json + watchlist.json (16 tickers: 8 + 8)
@@ -30,34 +77,25 @@ Layer A News Schedule (16:00 Paris, Mon–Fri)
   Aggregate all raw news
          │
          ▼
-  Warren Call 1 — ticker-watch  (POST /filter)
+  Warren Call — ticker-watch  (POST /filter)
   Reads memory/tickers/SYMBOL.md (last 3 entries)
   Returns { new: [...], skip: [...] }
          │
-         ▼ new tickers only
-  Warren Call 2 — executive-synthesis  (POST /synthesize)
-  Prompt includes the daily MACRO DU JOUR snapshot
-  (geopolitics, Fed, dollar — fetched via web search)
-  French briefing, signal-first format, NO # headings
-  Writes memory for each new ticker
-         │
-         ▼
-     Telegram
+         ▼ NEW tickers only
+  POST /memorize (handle_memorize)
+  Writes memory/tickers/SYMBOL.md for each NEW ticker
+  No Warren synthesis call — no Telegram message
 ```
 
 **SKIP logic** — a ticker is skipped if:
 - Haiku found no news from today
 - Today's news is semantically identical to an existing memory entry (duplicate)
 
-If no ticker is NEW → pipeline stops. No message.
+If no ticker is NEW → pipeline stops silently. No message is sent.
 
-**Briefing format** (enforced by `agents/warren/prompt_builder.py` + the
-`executive-synthesis` skill): macro section first — **external context only**
-(geopolitical risks moving markets, Fed stance, dollar), never a summary of
-portfolio sectors — then one signal-first block per ticker
-(`TICKER ✅ RENFORCER` / one-sentence justification / → conclusion).
+**Purpose** — Layer A feeds `memory/tickers/SYMBOL.md`, which Warren reads when researching anomaly alerts (Layer B step S7). Suppressing the synthesis/Telegram node removes noise while preserving the memory pipeline.
 
-**Estimated cost**: ~$0.01/day (16 Haiku calls + 2 Warren calls + 1 macro search)
+**Note on `/synthesize`** — `warren_server.py` still exposes `POST /synthesize` (legacy endpoint, present for backward compatibility). It is no longer called by the n8n workflow.
 
 ---
 
@@ -84,7 +122,7 @@ Layer B EOD Schedule (21:30 UTC, Mon–Fri — DST-safe, always ≥ 30 min after
   JSON result { survivor_count, should_send, digest, data_issues }
          │
          ▼ if survivors
-  One Telegram digest (reuses Layer A aggregation/split nodes)
+  One Telegram digest (reuses Aggregate for Telegram / Split for Telegram / Send Telegram nodes)
 ```
 
 No alert survives → nothing is sent.
@@ -182,15 +220,30 @@ sector mapping in `data/sector_factors.json`, hysteresis in
 
 ---
 
+## Skills — on-demand Telegram commands
+
+| Skill | Trigger | What |
+|---|---|---|
+| **tickerbrief** | `brief TICKER`, `point sur TICKER`, `actu TICKER` | On-demand brief: today's news + ticker memory + EOD anomaly state + sector. Read-only. |
+| **modifyportfolio** | natural language via Warren | Add/remove tickers from portfolio.json interactively |
+| **modifywatchlist** | natural language via Warren | Add/remove tickers from watchlist.json interactively |
+
+**tickerbrief** assembles: memory/tickers/SYMBOL.md, fresh web search news, dedup_state.json anomaly state, sector_factors.json. Read-only — never writes files. Returns a signal-first Telegram reply (anomaly status first, then news, then memory). For tickers not in portfolio/watchlist, returns raw web search only.
+
+---
+
 ## Features
 
-- **Two independent layers** — news context (A) + EOD anomaly trigger (B), one Telegram channel
+- **Macro Brief** — daily market regime brief sent at 16h Paris even with no ticker news
+- **Two independent layers** — silent news collection (A) + EOD anomaly trigger (B), one Telegram channel
 - **Zero LLM in the detection path** — Layer B is pure Python/statistics until an alert survives
 - **Date-filtered news** — Haiku searches for today's news only
-- **Duplicate memory** — Warren compares each ticker's news against the last 3 entries
+- **Duplicate memory** — Warren compares each ticker's news against the last 3 entries; only new content is written
 - **Layer A ↔ B cross-reference** — Warren's anomaly research includes the ticker's news memory
-- **Daily macro snapshot** — geopolitics/Fed/dollar fetched once via web search, injected into the briefing
-- **Signal-first briefing** — recommendation on the first line of each ticker block, no `#` headings
+- **Sector rotation signal** — `sector_rotation.py` computes sector ETF relative performance + IWM/SPY ratio (zero LLM)
+- **Fear & Greed** — `fear_greed.py` fetches CNN Fear & Greed index (best-effort, zero LLM)
+- **On-demand ticker brief** — `tickerbrief` skill via Telegram: full ticker context without triggering a digest
+- **Signal-first briefing** — dominant market regime on the first line of the macro brief
 - **Tickers as data** — `portfolio.json` / `watchlist.json` are the source of truth, editable via Telegram (`modifyportfolio` / `modifywatchlist` skills)
 - **Symbol integrity** — registry + quarantine (`market_intelligence/data/`) so analysis never runs on a wrong ticker
 - **Auto-split Telegram** — messages split at 4,000 characters at paragraph boundaries
@@ -204,12 +257,14 @@ sector mapping in `data/sector_factors.json`, hysteresis in
 | Component | Role |
 |---|---|
 | **n8n** (self-hosted) | Scheduling, API calls, credential management, delivery |
-| **Claude Haiku** (`claude-haiku-4-5-20251001`) | Per-ticker raw news search via `web_search` + macro snapshot extraction |
+| **Claude Haiku** (`claude-haiku-4-5-20251001`) | Per-ticker raw news search via `web_search` + macro web search |
 | **OpenClaw** | Agent framework wrapping Claude for Warren |
-| **Warren** (OpenClaw agent) | Intelligence layer — filtering, memory, French synthesis, alert explanations |
+| **Warren** (OpenClaw agent) | Intelligence layer — filtering, memory, Macro Brief prose, alert explanations |
 | **warren_server.py** | Python HTTP bridge between n8n and OpenClaw CLI (port 18795) |
-| **agents/warren/** | Prompt builder (persona, output format) + macro providers (FRED, web search) |
+| **agents/warren/** | Prompt builder (persona, output format) + macro providers (FRED, web search, market closes) |
 | **market_intelligence/** | Layer B — EOD fetch, anomaly signals, beta gate, dedup, EDGAR, short interest, orchestrator |
+| **market_intelligence/sector_rotation.py** | Sector ETF relative performance + IWM/SPY ratio — zero LLM, feeds Macro Brief |
+| **market_intelligence/fear_greed.py** | CNN Fear & Greed index fetch — zero LLM, feeds Macro Brief |
 
 ---
 
@@ -217,15 +272,21 @@ sector mapping in `data/sector_factors.json`, hysteresis in
 
 ```
 stock-tracker/
-├── workflow.json              # n8n workflow (Layer A + Layer B wiring)
-├── warren_server.py           # Python HTTP bridge (port 18795)
+├── workflow.json              # n8n workflow (Macro Brief + Layer A silent + Layer B wiring)
+├── warren_server.py           # Python HTTP bridge (port 18795): /filter /memorize /macro-brief /synthesize(legacy)
 ├── portfolio.json             # 8 portfolio tickers (source of truth)
 ├── watchlist.json             # 8 watchlist tickers (source of truth)
 ├── requirements.txt           # Python deps (pydantic, requests, anthropic, numpy, pandas, yfinance, pyarrow)
-├── agents/warren/             # Prompt builder, macro providers, ticker management
+├── agents/warren/             # Prompt builder, macro providers (FRED, web search, market closes), ticker management
 ├── market_intelligence/       # Layer B anomaly detection (S0–S8)
+│   ├── sector_rotation.py     # Sector ETF rotation + IWM/SPY ratio (zero LLM)
+│   ├── fear_greed.py          # CNN Fear & Greed index (zero LLM)
 │   └── data/                  # registry, quarantine, thresholds, sector factors
-├── skills/                    # OpenClaw skills sources (modifyportfolio, modifywatchlist)
+├── skills/                    # OpenClaw skills sources
+│   ├── macrobrief/            # Macro Brief skill spec (SKILL.md)
+│   ├── tickerbrief/           # On-demand ticker brief skill spec (SKILL.md)
+│   ├── modifyportfolio/       # Portfolio management via Telegram
+│   └── modifywatchlist/       # Watchlist management via Telegram
 ├── tests/                     # pytest suite (agents, market_intelligence, workflow wiring)
 ├── docs/                      # project-structure, deployment, ticker schema
 ├── deploy/                    # CI/CD: remote.sh + import_workflow.py
@@ -236,10 +297,11 @@ stock-tracker/
 ├── ARCHITECTURE.md                            # Pipeline documentation
 ├── skills/
 │   ├── ticker-watch/          # Filter skill (NEW vs SKIP)
-│   ├── executive-synthesis/   # Synthesis skill (French briefing format)
+│   ├── macro-brief/           # Macro Brief skill (French prose, 150-300 words)
+│   ├── tickerbrief/           # On-demand ticker brief skill
 │   ├── modifyportfolio/       # Telegram portfolio management
 │   └── modifywatchlist/       # Telegram watchlist management
-└── memory/tickers/            # SYMBOL.md — last 3 raw news entries
+└── memory/tickers/            # SYMBOL.md — last 3 raw news entries (written by Layer A /memorize)
 ```
 
 ---
@@ -321,8 +383,8 @@ cd /opt/apps/stock-tracker
 sudo pip3 install --break-system-packages -r requirements.txt
 ```
 
-> `anthropic` is required by the macro snapshot (geopolitics/Fed/dollar web search).
-> Without it the briefing silently falls back to stale hardcoded macro values.
+> `anthropic` is required by the macro web search (Haiku `web_search` calls for Fed/geopolitics/sectors).
+> Without it the Macro Brief silently falls back to quantitative FRED data only.
 
 ---
 
@@ -472,9 +534,9 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-> `EnvironmentFile` is **required** on the bridge service: the macro snapshot
-> calls the Anthropic API directly and needs `ANTHROPIC_API_KEY` in the process
-> environment.
+> `EnvironmentFile` is **required** on the bridge service: the Macro Brief
+> calls the Anthropic API directly (Haiku web search) and needs `ANTHROPIC_API_KEY`
+> in the process environment.
 
 Enable and start all three:
 
@@ -554,6 +616,22 @@ curl -s -X POST http://127.0.0.1:18795/filter \
   | python3 -m json.tool
 
 # Expected: {"new": ["SMR"], "skip": ["OKLO"], "reasons": {...}}
+
+# Test memorize endpoint (silent memory write, no synthesis)
+curl -s -X POST http://127.0.0.1:18795/memorize \
+  -H 'Content-Type: application/json' \
+  -d '{"newTickers":["SMR"],"allNews":{"SMR":"NuScale signs PPA with Azure today"}}' \
+  | python3 -m json.tool
+
+# Expected: {"status": "ok", "written": ["SMR"]}
+
+# Test macro-brief endpoint
+curl -s -X POST http://127.0.0.1:18795/macro-brief \
+  -H 'Content-Type: application/json' \
+  -d '{}' \
+  | python3 -m json.tool
+
+# Expected: {"brief": "Le marché aborde cette séance dans un régime..."}
 ```
 
 Test the Layer B pipeline end-to-end (prints a JSON payload):
@@ -620,9 +698,10 @@ Warren stores raw news per ticker in `/home/warren/.openclaw/workspace-warren/me
 
 - One file per ticker: `SYMBOL.md`
 - Max 3 entries, newest first, separated by `---`
-- Written only when new content is confirmed (after synthesis)
+- Written by Layer A `/memorize` endpoint — only when new content is confirmed by Warren filter
 - **Also read by Layer B**: the anomaly research prompt includes this memory, so
   Warren interprets a price move knowing what news already surfaced for the ticker
+- **Also read by `tickerbrief` skill**: on-demand context without triggering a new search
 - To reset a ticker's memory: `rm memory/tickers/SYMBOL.md`
 - To reset all memory: `rm memory/tickers/*.md`
 
@@ -649,7 +728,7 @@ sudo journalctl -u openclaw-warren -f     # OpenClaw logs
 
 | Variable | Description |
 |---|---|
-| `ANTHROPIC_API_KEY` | Anthropic API key (Haiku calls in n8n + macro snapshot in the bridge) |
+| `ANTHROPIC_API_KEY` | Anthropic API key (Haiku web_search in n8n + macro brief Haiku calls in the bridge) |
 | `TELEGRAM_TOKEN` | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | Target chat ID |
 | `TWELVE_DATA_API_KEY` | Layer B EOD data fallback (yfinance primary) |
@@ -659,7 +738,7 @@ sudo journalctl -u openclaw-warren -f     # OpenClaw logs
 | `N8N_BASIC_AUTH_USER` | n8n login username |
 | `N8N_BASIC_AUTH_PASSWORD` | n8n login password |
 | `N8N_ENCRYPTION_KEY` | Credentials encryption key (generate once, never change) |
-| `GENERIC_TIMEZONE` | Timezone for Layer A scheduling (`Europe/Paris`). Layer B cron is UTC by design (DST safety) |
+| `GENERIC_TIMEZONE` | Timezone for Layer A and Macro Brief scheduling (`Europe/Paris`). Layer B cron is UTC by design (DST safety) |
 | `GMAIL_USER` / `GMAIL_PASS` | **Legacy** — email delivery was removed; Telegram only |
 
 ---
@@ -669,8 +748,12 @@ sudo journalctl -u openclaw-warren -f     # OpenClaw logs
 Specs and decision log live in the Notion epics database (« Epics Stock Tracker »)
 and the Obsidian vault (`Memory/stock-tracker/epics/`). Key choices:
 
-- **Haiku for search** — cheaper, faster, sufficient for raw news retrieval
-- **Two Warren calls** — filter and synthesis separated for testability and fail-safety
+- **Macro Brief as main product** — daily market regime brief even with no ticker news; Layer A becomes a silent collector
+- **Layer A silent collection** — the Haiku + filter + memory pipeline survives suppression of synthesis/Telegram; preserves the `ticker_news_memory` context consumed by Warren S7
+- **`/memorize` endpoint decoupled from `/synthesize`** — memory write triggered by Layer A without a Warren synthesis call; `/synthesize` kept as legacy for backward compatibility
+- **`sector_rotation.py` + `fear_greed.py` zero-LLM** — quantitative signals injected into the Macro Brief without adding LLM cost to the collection path
+- **Haiku for search** — cheaper, faster, sufficient for raw news retrieval and macro web search
+- **Warren filter only in Layer A** — filter (NEW/SKIP dedup) retained; synthesis removed
 - **Memory = raw news** — storing Haiku output (not Warren synthesis) for stable duplicate comparison
 - **warren_server.py** — Python bridge needed because n8n sandboxes `fs` and `child_process` modules
 - **No LLM in the detection path** — Layer B anomalies are pure statistics; Warren is only paid for surviving alerts
