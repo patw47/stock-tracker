@@ -27,3 +27,14 @@ portfolio.json
 
 # Runtime anomaly state
 runtime/
+
+# Agent tooling & local orchestration (machine-specific ; symlinks vers l'Obsidian vault).
+# Ne doivent plus être versionnés — présents en local, ignorés côté repo.
+.claude/
+.codex/
+.conventions
+.epic.md
+.rules
+.sprint.md
+AGENTS.md
+CLAUDE.md
