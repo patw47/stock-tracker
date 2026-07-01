@@ -91,7 +91,10 @@ def test_eod_branch_uses_registry_runner_and_reuses_telegram_nodes() -> None:
     assert schedule["parameters"]["rule"]["interval"][0]["expression"] == (
         "30 21 * * 1-5"
     )
-    assert schedule["parameters"]["timezone"] == "UTC"
+    # Le param timezone par-nœud est inerte dans ScheduleTrigger : c'est
+    # settings.timezone (UTC) au niveau workflow qui gouverne. EOD doit partir 21:30 UTC.
+    assert "timezone" not in schedule["parameters"]
+    assert workflow["settings"]["timezone"] == "UTC"
     assert _edge_targets(workflow, "Layer B EOD Schedule 21h30 UTC") == [
         "Run EOD Anomaly Pipeline S0-S7"
     ]
@@ -151,8 +154,9 @@ def test_macro_brief_schedule_wired_to_telegram() -> None:
     nodes = _nodes_by_name(workflow)
 
     schedule = nodes["Macro Brief Schedule 16h Mon-Fri"]
-    assert schedule["parameters"]["rule"]["interval"][0]["expression"] == "0 16 * * 1-5"
-    assert schedule["parameters"]["timezone"] == "Europe/Paris"
+    # 14:00 UTC = 16h Paris (été), sous settings.timezone=UTC.
+    assert schedule["parameters"]["rule"]["interval"][0]["expression"] == "0 14 * * 1-5"
+    assert "timezone" not in schedule["parameters"]
 
     assert _edge_targets(workflow, "Macro Brief Schedule 16h Mon-Fri") == [
         "Call Warren Macro Brief"

@@ -31,14 +31,21 @@ class Registry:
     portfolio_tickers: tuple[TickerEntry, ...]
     macro_tickers: tuple[TickerEntry, ...]
     alias_map: dict[str, str]
+    factor_tickers: tuple[TickerEntry, ...] = ()
 
     def resolve_api_symbol(self, symbol: str) -> str:
         """Return the API symbol to use for a given canonical symbol."""
         return self.alias_map.get(symbol, symbol)
 
     def all_tickers(self) -> tuple[TickerEntry, ...]:
-        """Return portfolio + macro tickers combined."""
-        return self.portfolio_tickers + self.macro_tickers
+        """Return portfolio + macro + factor tickers combined.
+
+        Factor tickers are the sector/thematic ETFs used by the beta gate. They must
+        be fetched (so their EOD frames are available for factor neutralisation) but
+        they are NOT portfolio tickers, so they never generate candidate alerts, and
+        NOT macro tickers, so they never pollute the macro snapshot completeness check.
+        """
+        return self.portfolio_tickers + self.macro_tickers + self.factor_tickers
 
 
 def _parse_ticker(raw: dict[str, str]) -> TickerEntry:
@@ -54,13 +61,20 @@ def load_registry() -> Registry:
     raw = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
     portfolio = tuple(_parse_ticker(t) for t in raw["portfolio_tickers"])
     macro = tuple(_parse_ticker(t) for t in raw["macro_tickers"])
+    factor = tuple(_parse_ticker(t) for t in raw.get("factor_tickers", []))
     alias_map: dict[str, str] = raw.get("alias_map", {})
     logger.debug(
-        "Registry loaded: %d portfolio, %d macro tickers",
+        "Registry loaded: %d portfolio, %d macro, %d factor tickers",
         len(portfolio),
         len(macro),
+        len(factor),
     )
-    return Registry(portfolio_tickers=portfolio, macro_tickers=macro, alias_map=alias_map)
+    return Registry(
+        portfolio_tickers=portfolio,
+        macro_tickers=macro,
+        alias_map=alias_map,
+        factor_tickers=factor,
+    )
 
 
 def load_quarantine() -> list[QuarantineEntry]:

@@ -8,7 +8,7 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 16 * * 1-5"
+              "expression": "0 14 * * 1-5"
             }
           ]
         }
@@ -292,8 +292,7 @@
               "expression": "30 21 * * 1-5"
             }
           ]
-        },
-        "timezone": "UTC"
+        }
       },
       "id": "node-eod-schedule",
       "name": "Layer B EOD Schedule 21h30 UTC",
@@ -392,11 +391,10 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 16 * * 1-5"
+              "expression": "0 14 * * 1-5"
             }
           ]
-        },
-        "timezone": "Europe/Paris"
+        }
       },
       "id": "node-macro-brief-schedule",
       "name": "Macro Brief Schedule 16h Mon-Fri",
@@ -680,7 +678,8 @@
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "timezone": "UTC"
   },
   "active": true
 }
