@@ -4,6 +4,7 @@ import logging
 from dataclasses import asdict, dataclass
 from html.parser import HTMLParser
 from typing import Final, Literal
+from xml.etree import ElementTree
 
 import requests
 
@@ -13,9 +14,10 @@ logger = logging.getLogger(__name__)
 
 MarketStatus = Literal["active", "inactive", "halted", "unknown"]
 
-_FINRA_HALT_URL: Final[str] = (
-    "https://api.finra.org/data/group/otcMarket/name/haltedSecurities"
-)
+# Flux public NASDAQ Trader des trade halts (agrège les halts réglementaires FINRA +
+# bourses). L'ancien endpoint api.finra.org/.../haltedSecurities renvoyait 404 (API
+# déplacée derrière OAuth).
+_HALT_FEED_URL: Final[str] = "https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts"
 _NASDAQ_SSR_URL: Final[str] = (
     "https://www.nasdaqtrader.com/dynamic/symdir/shortsalecircuitbreaker.htm"
 )
@@ -67,12 +69,29 @@ class _SSRTableParser(HTMLParser):
                 self.symbols.append(symbol.upper())
 
 
+def _localname(tag: str) -> str:
+    """Strip any XML namespace prefix from an ElementTree tag."""
+    return tag.rsplit("}", 1)[-1]
+
+
 def _fetch_finra_halts() -> set[str]:
-    """Fetch current FINRA halt list; raise on any error."""
-    response = requests.get(_FINRA_HALT_URL, timeout=_HTTP_TIMEOUT)
+    """Fetch symbols currently halted from the NASDAQ Trader feed; raise on error.
+
+    A symbol is still halted when its feed item carries no resumption trade time
+    (trading has not resumed yet).
+    """
+    response = requests.get(_HALT_FEED_URL, timeout=_HTTP_TIMEOUT)
     response.raise_for_status()
-    data = response.json()
-    return {item["issueSymbol"].upper() for item in data if "issueSymbol" in item}
+    root = ElementTree.fromstring(response.content)
+    halted: set[str] = set()
+    for item in root.iter():
+        if _localname(item.tag) != "item":
+            continue
+        fields = {_localname(child.tag): (child.text or "").strip() for child in item}
+        symbol = fields.get("IssueSymbol", "").upper()
+        if symbol and not fields.get("ResumptionTradeTime"):
+            halted.add(symbol)
+    return halted
 
 
 def _fetch_nasdaq_ssr() -> set[str]:

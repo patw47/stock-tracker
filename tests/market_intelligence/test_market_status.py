@@ -15,10 +15,10 @@ def _entry(symbol: str = "AAPL") -> TickerEntry:
     return TickerEntry(symbol=symbol, api_symbol=symbol, expected_name="Test Corp")
 
 
-def _json_response(data: object) -> Mock:
+def _xml_response(text: str) -> Mock:
     r = Mock()
     r.raise_for_status.return_value = None
-    r.json.return_value = data
+    r.content = text.encode("utf-8")
     return r
 
 
@@ -29,8 +29,24 @@ def _html_response(text: str) -> Mock:
     return r
 
 
-def _finra_payload(symbols: list[str]) -> list[dict[str, str]]:
-    return [{"issueSymbol": s} for s in symbols]
+def _halt_rss(halted: list[str], resumed: list[str] | None = None) -> str:
+    """Build a NASDAQ Trader tradehalts RSS. `resumed` symbols carry a resumption
+    trade time and must NOT be treated as currently halted."""
+    items = [
+        f"<item><ndaq:IssueSymbol>{s}</ndaq:IssueSymbol>"
+        f"<ndaq:ReasonCode>LUDP</ndaq:ReasonCode></item>"
+        for s in halted
+    ]
+    items += [
+        f"<item><ndaq:IssueSymbol>{s}</ndaq:IssueSymbol>"
+        f"<ndaq:ReasonCode>LUDP</ndaq:ReasonCode>"
+        f"<ndaq:ResumptionTradeTime>09:35:00</ndaq:ResumptionTradeTime></item>"
+        for s in (resumed or [])
+    ]
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<rss xmlns:ndaq="urn:nasdaq"><channel>' + "".join(items) + "</channel></rss>"
+    )
 
 
 def _nasdaq_html(symbols: list[str]) -> str:
@@ -53,7 +69,7 @@ def reset_cache() -> None:
 def test_finra_ticker_present_returns_halted() -> None:
     with patch("market_intelligence.market_status.requests.get") as mock_get:
         mock_get.side_effect = [
-            _json_response(_finra_payload(["AAPL", "GME"])),
+            _xml_response(_halt_rss(["AAPL", "GME"])),
             _html_response(_nasdaq_html([])),
         ]
         result = fetch_market_status(_entry("AAPL"))
@@ -63,7 +79,18 @@ def test_finra_ticker_present_returns_halted() -> None:
 def test_finra_ticker_absent_fetch_ok_returns_active() -> None:
     with patch("market_intelligence.market_status.requests.get") as mock_get:
         mock_get.side_effect = [
-            _json_response(_finra_payload(["GME"])),
+            _xml_response(_halt_rss(["GME"])),
+            _html_response(_nasdaq_html([])),
+        ]
+        result = fetch_market_status(_entry("AAPL"))
+    assert result.halt_status == "active"
+
+
+def test_finra_resumed_symbol_not_halted() -> None:
+    """A symbol present in the feed but already resumed is not currently halted."""
+    with patch("market_intelligence.market_status.requests.get") as mock_get:
+        mock_get.side_effect = [
+            _xml_response(_halt_rss(halted=["GME"], resumed=["AAPL"])),
             _html_response(_nasdaq_html([])),
         ]
         result = fetch_market_status(_entry("AAPL"))
@@ -87,7 +114,7 @@ def test_finra_fetch_failure_returns_unknown_with_data_issue() -> None:
 def test_nasdaq_ticker_present_returns_halted() -> None:
     with patch("market_intelligence.market_status.requests.get") as mock_get:
         mock_get.side_effect = [
-            _json_response(_finra_payload([])),
+            _xml_response(_halt_rss([])),
             _html_response(_nasdaq_html(["AAPL", "SPY"])),
         ]
         result = fetch_market_status(_entry("AAPL"))
@@ -97,7 +124,7 @@ def test_nasdaq_ticker_present_returns_halted() -> None:
 def test_nasdaq_ticker_absent_fetch_ok_returns_active() -> None:
     with patch("market_intelligence.market_status.requests.get") as mock_get:
         mock_get.side_effect = [
-            _json_response(_finra_payload([])),
+            _xml_response(_halt_rss([])),
             _html_response(_nasdaq_html(["GME"])),
         ]
         result = fetch_market_status(_entry("AAPL"))
@@ -107,7 +134,7 @@ def test_nasdaq_ticker_absent_fetch_ok_returns_active() -> None:
 def test_nasdaq_fetch_failure_returns_unknown_with_data_issue() -> None:
     with patch("market_intelligence.market_status.requests.get") as mock_get:
         mock_get.side_effect = [
-            _json_response(_finra_payload([])),
+            _xml_response(_halt_rss([])),
             Exception("500 server error"),
         ]
         result = fetch_market_status(_entry("AAPL"))
@@ -136,7 +163,7 @@ def test_finra_failure_does_not_block_nasdaq_fetch() -> None:
 def test_cache_http_called_once_per_source_across_multiple_tickers() -> None:
     with patch("market_intelligence.market_status.requests.get") as mock_get:
         mock_get.side_effect = [
-            _json_response(_finra_payload(["GME"])),
+            _xml_response(_halt_rss(["GME"])),
             _html_response(_nasdaq_html(["AAPL"])),
         ]
         fetch_market_status(_entry("AAPL"))

@@ -177,3 +177,17 @@ soir). Un test wiring vérifie que toute commande `executeCommand` contenant `{{
   Telegram` et ne déclenche jamais de commit.
 - **Pending orphelin** (crash entre calcul et commit) : le run suivant recalcule **toujours
   depuis l'état réel** (l'orphelin n'est jamais lu), l'écrase et logge un warning.
+**`NODES_EXCLUDE=[]` (REQUIS dans `.env`)** — n8n 2.20+ exclut par défaut le nœud
+`n8n-nodes-base.executeCommand`. Le workflow l'utilise (« Run EOD Anomaly Pipeline S0-S7 »
+lance `python3 -m market_intelligence.eod_orchestrator`). Sans cet override, n8n throw
+`Unrecognized node type: executeCommand` à l'activation et **n'arme aucun trigger** (le
+workflow entier reste inactif). `NODES_EXCLUDE=[]` retire l'exclusion. ⚠️ Autorise
+l'exécution de commandes shell par les workflows n8n (user `warren`) — voulu ici. Cf. PM-0001.
+
+**Publication de version (n8n 2.20)** — n8n exécute la **version publiée** d'un workflow
+(`workflow_entity.activeVersionId` → `workflow_history`, via `workflow_published_version`),
+pas `workflow_entity.nodes`. `import_workflow.py` crée donc une nouvelle version publiée et
+repointe `activeVersionId` / `workflow_published_version` / `workflow_publish_history` à
+chaque import, sinon n8n continuerait de lancer l'ancienne version publiée (le draft
+importé serait ignoré). Une assertion post-import vérifie que la version publiée reflète
+`workflow.json`. Cf. PM-0001.
