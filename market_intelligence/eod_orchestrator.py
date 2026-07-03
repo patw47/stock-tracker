@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import logging
+import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -252,25 +254,70 @@ def _attach_cached_macro(
     )
 
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html_tags(text: str) -> str:
+    return _HTML_TAG_RE.sub("", text)
+
+
 def format_digest(
     analyses: Sequence[WarrenAlertAnalysis],
     *,
     as_of: str | None,
 ) -> str:
-    """Aggregate all S7 analyses into one Telegram-ready digest."""
+    """Aggregate all S7 analyses into one Telegram-ready digest (parse_mode=HTML).
+
+    Headings are Telegram-native (émoji + ``<b>``) and every value coming from
+    Warren prose / tickers / dates is ``html.escape``d so no special character
+    (`_ * < > & ``` `) can break the send. Each ``<b>`` tag stays within a single
+    line so paragraph-based chunking never orphans a tag.
+    """
     if not analyses:
         return ""
-    date_label = as_of or "unknown date"
+    date_label = html.escape(as_of or "unknown date")
     lines = [
-        f"# EOD anomaly digest - {date_label}",
+        f"📊 <b>EOD anomaly digest — {date_label}</b>",
         "",
         f"Survivors: {len(analyses)}",
         "",
     ]
     for index, analysis in enumerate(analyses, start=1):
         text = analysis.analysis.strip() or "No Warren analysis returned."
-        lines.extend((f"## {index}. {analysis.ticker}", text, ""))
+        lines.extend(
+            (f"<b>{index}. {html.escape(analysis.ticker)}</b>", html.escape(text), "")
+        )
     return "\n".join(lines).strip()
+
+
+def split_telegram_html(text: str, limit: int = 4000) -> list[str]:
+    """Split HTML text into <=limit chunks without orphaning a tag.
+
+    Splits on paragraph (``\\n\\n``) boundaries; since each ``<b>`` tag is
+    contained in one paragraph, no chunk cuts a tag. A single oversized paragraph
+    (> limit) is degraded to plain text (tags stripped) then hard-sliced.
+    """
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    current = ""
+    for paragraph in re.split(r"\n\n+", text):
+        candidate = f"{current}\n\n{paragraph}" if current else paragraph
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+            current = ""
+        if len(paragraph) <= limit:
+            current = paragraph
+        else:
+            plain = _strip_html_tags(paragraph)
+            for start in range(0, len(plain), limit):
+                chunks.append(plain[start : start + limit])
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def run_eod_anomaly_pipeline(
