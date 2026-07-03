@@ -46,8 +46,11 @@ comes back as an incoming message and is routed here.
 ## Flow (what the buttons do — handled by the script)
 
 1. `/modifyportfolio` → "What would you like to do?" + **[➕ Add a ticker] [➖ Remove a ticker]**.
-2. **Add** (`pf:add`) → prompt for symbol(s); the user types e.g. `NVDA, MSFT` → the file is
-   updated with each ticker and its `added` date → ✅ confirmation with the new list.
+2. **Add** (`pf:add`) → prompt for symbol(s); the user types e.g. `NVDA, MSFT` → each symbol is
+   validated and **onboarded** into the Layer B referentials (registry, `speculative`
+   classification, `single_factor_symbols`) with safe defaults, the file is updated with each
+   ticker and its `added` date → ✅ confirmation listing what was generated and any manual
+   follow-up (sector-factor ETF to choose in a PR). An invalid symbol is refused, nothing written.
 3. **Remove** (`pf:rem`) → current tickers shown as toggle buttons + **✅ Validate / ⛔ Cancel**;
    tapping toggles selection (`pf:tog:SYMBOL`), **✅ Validate** (`pf:val`) removes them and
    stamps the file → ✅ confirmation.
@@ -58,3 +61,6 @@ comes back as an incoming message and is routed here.
 - After any `--handle-callback` / `--add-text`, reply `NO_REPLY` — the script owns the
   Telegram messages; do not duplicate them.
 - This command is for the **Portfolio**. Watchlist → `/modifywatchlist` (same engine).
+- Onboarding uses safe defaults only (`speculative` + `single_factor`); it never guesses a
+  sector-factor ETF mapping and never commits/pushes from the VPS — reconciling the modified
+  `market_intelligence/data/` files to git stays manual (the reply lists the diff to report).
