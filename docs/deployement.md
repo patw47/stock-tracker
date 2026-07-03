@@ -52,6 +52,47 @@ Without it the briefing silently falls back to hardcoded macro values.
 `TELEGRAM_ORCHESTRATION_CHAT_ID`, `PROJECT_NAME` (status message). No SSH secrets needed
 (self-hosted runner). Runner uses the repo-scoped `GITHUB_TOKEN` for the git fetch.
 
+## Watchdog EOD externe (Epic 2 — Observabilité, Sprint 2)
+
+Garde-fou **indépendant de n8n** : alerte sur Telegram si le run EOD officiel de 21:30 UTC
+n'a pas eu lieu ou a échoué un jour ouvré — même si n8n (ou tout le service) est mort.
+
+- **`deploy/watchdog_eod.py`** — lancé par un **timer systemd** (`deploy/eod-watchdog.timer`,
+  `OnCalendar=Mon..Fri *-*-* 22:15:00 UTC`, ~45 min après le cron 21:30) via
+  `deploy/eod-watchdog.service` (`Type=oneshot`, `User=queenp`). Installé et activé par
+  `remote.sh` à chaque deploy ; son état est rapporté par `STATUS_WATCHDOG_TIMER` (visible
+  dans le message Telegram de déploiement, ligne « watchdog EOD »).
+- **Détection** :
+  - *Primaire (source de vérité)* — `runtime/market_intelligence/runs.jsonl` : dernier run
+    officiel (`dry_run=false`). Pas de run daté d'aujourd'hui → **alerte rouge** (le pipeline
+    n'a pas tourné / a échoué avant journalisation). Run présent mais `as_of` périmé/absent →
+    **alerte jaune adoucie** (jour férié US probable, faux positif accepté). `as_of` du jour →
+    OK.
+  - *Secondaire (lecture seule, best-effort)* — `n8n-data/.n8n/database.sqlite`
+    (`mode=ro`), table `execution_entity`. Divergence (journal dit « run » mais n8n ne
+    rapporte aucune exécution réussie) → **alerte orange**. Toute DB/table/colonne
+    manquante ou illisible → statut `unknown`, silencieux (jamais de crash, jamais d'écriture).
+- **Envoi** : API bot Telegram directe (`urllib`, stdlib), `TELEGRAM_TOKEN` + `TELEGRAM_CHAT_ID`
+  lus depuis `/opt/apps/stock-tracker/.env`. Le watchdog ne dépend donc pas de n8n pour alerter.
+
+**Test manuel sur le VPS** (prouve l'indépendance vis-à-vis de n8n) :
+
+```bash
+# En tant que queenp. --check-only évalue sans envoyer.
+sudo systemctl stop stock-tracker            # n8n arrêté
+python3 /opt/apps/stock-tracker/deploy/watchdog_eod.py --check-only   # doit rendre un verdict
+python3 /opt/apps/stock-tracker/deploy/watchdog_eod.py               # envoie l'alerte Telegram
+sudo systemctl start stock-tracker
+
+# Déclencher le timer immédiatement (sans attendre 22:15) :
+sudo systemctl start eod-watchdog.service
+systemctl status eod-watchdog.timer          # doit être active/waiting
+journalctl -u eod-watchdog.service --no-pager | tail
+```
+
+Le watchdog écrit uniquement sur Telegram (aucune écriture disque/DB). Voir l'ADR
+`decisions/2026-07-02_observabilite.md`.
+
 ## Mode dry-run du pipeline EOD (Sprint 1 — epic dédup transactionnel)
 
 Le pipeline `python -m market_intelligence.eod_orchestrator` peut être exécuté **sans

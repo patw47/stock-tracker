@@ -66,6 +66,7 @@ jobs:
             echo "stock_tracker=$(get STATUS_STOCK_TRACKER)"
             echo "warren=$(get STATUS_WARREN)"
             echo "n8n_health=$(get STATUS_N8N_HEALTH)"
+            echo "watchdog_timer=$(get STATUS_WATCHDOG_TIMER)"
             echo "overall=$(get STATUS_OVERALL)"
           } >> "$GITHUB_OUTPUT"
           overall=$(get STATUS_OVERALL)
@@ -84,6 +85,7 @@ jobs:
           st="${{ steps.deploy.outputs.stock_tracker }}"
           wr="${{ steps.deploy.outputs.warren }}"
           hl="${{ steps.deploy.outputs.n8n_health }}"
+          wd="${{ steps.deploy.outputs.watchdog_timer }}"
           ov="${{ steps.deploy.outputs.overall }}"
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
@@ -99,6 +101,7 @@ jobs:
             "service stock-tracker: $(icon "${st:-?}") ${st:-inconnu}" \
             "agent warren: $(icon "${wr:-?}") ${wr:-inconnu}" \
             "n8n health: $(icon "${hl:-?}") ${hl:-inconnu}" \
+            "watchdog EOD: $(icon "${wd:-?}") ${wd:-inconnu}" \
             "commit: ${HEAD_SHA:0:7}" \
             "$run_url")
 

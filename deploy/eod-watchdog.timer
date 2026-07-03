@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Stock Tracker EOD watchdog on weekdays after the 21:30 UTC run
+
+[Timer]
+# ~45 min after the 21:30 UTC EOD cron, weekdays only. UTC is pinned explicitly
+# so the schedule does not drift with the VPS system timezone.
+OnCalendar=Mon..Fri *-*-* 22:15:00 UTC
+Persistent=true
+Unit=eod-watchdog.service
+
+[Install]
+WantedBy=timers.target
