@@ -319,6 +319,19 @@
     },
     {
       "parameters": {
+        "command": "cd /opt/apps/stock-tracker && python3 -m market_intelligence.eod_orchestrator --history-days 280 --dry-run --skip-warren"
+      },
+      "id": "node-eod-deploy-dryrun",
+      "name": "Run EOD Pipeline (deploy dry-run)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        520,
+        960
+      ]
+    },
+    {
+      "parameters": {
         "jsCode": "const raw = ($json.stdout || '').trim();\nif (!raw) {\n  throw new Error('EOD anomaly runner produced no JSON payload');\n}\nlet payload;\ntry {\n  payload = JSON.parse(raw);\n} catch (error) {\n  throw new Error('Invalid EOD anomaly JSON payload: ' + error.message + '\\n' + raw.slice(0, 500));\n}\nreturn [{ json: payload }];",
         "mode": "runOnceForAllItems"
       },
@@ -383,6 +396,89 @@
       "typeVersion": 2,
       "position": [
         1240,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $input.first().json.text || \"Aucune actualité pertinente aujourd'hui.\";\nconst MAX = 4000;\n\nif (text.length <= MAX) {\n  return [{ json: { chunk: text } }];\n}\n\nconst paragraphs = text.split(/\\n\\n+/);\nconst chunks = [];\nlet current = '';\n\nfor (const para of paragraphs) {\n  const candidate = current ? current + '\\n\\n' + para : para;\n  if (candidate.length > MAX) {\n    if (current) chunks.push(current);\n    current = para.length > MAX ? para.slice(0, MAX) : para;\n  } else {\n    current = candidate;\n  }\n}\nif (current) chunks.push(current);\n\nreturn chunks.map((chunk, i) => ({\n  json: { chunk: chunks.length > 1 ? '_(' + (i+1) + '/' + chunks.length + ')_\\n\\n' + chunk : chunk }\n}));"
+      },
+      "id": "node-eod-split",
+      "name": "Split EOD for Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "1543956122",
+        "text": "={{ $json.chunk }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "id": "node-eod-telegram",
+      "name": "Send EOD Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1680,
+        760
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "HBbPM9dctkeKAwG1",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-has-run-id",
+              "leftValue": "={{ $('Parse EOD Anomaly Result').item.json.run_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-eod-has-runid",
+      "name": "Has Run Id",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1900,
+        860
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=cd /opt/apps/stock-tracker && python3 -m market_intelligence.dedup_admin commit --run-id {{ $('Parse EOD Anomaly Result').item.json.run_id }}"
+      },
+      "id": "node-eod-commit",
+      "name": "Commit Dedup State",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2120,
         760
       ]
     },
@@ -571,7 +667,7 @@
             "index": 0
           },
           {
-            "node": "Run EOD Anomaly Pipeline S0-S7",
+            "node": "Run EOD Pipeline (deploy dry-run)",
             "type": "main",
             "index": 0
           }
@@ -631,14 +727,20 @@
             "index": 0
           }
         ],
-        []
+        [
+          {
+            "node": "Has Run Id",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Prepare EOD Digest for Telegram": {
       "main": [
         [
           {
-            "node": "Aggregate for Telegram",
+            "node": "Split EOD for Telegram",
             "type": "main",
             "index": 0
           }
@@ -676,6 +778,51 @@
             "index": 0
           }
         ]
+      ]
+    },
+    "Run EOD Pipeline (deploy dry-run)": {
+      "main": [
+        [
+          {
+            "node": "Parse EOD Anomaly Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split EOD for Telegram": {
+      "main": [
+        [
+          {
+            "node": "Send EOD Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send EOD Telegram": {
+      "main": [
+        [
+          {
+            "node": "Has Run Id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Run Id": {
+      "main": [
+        [
+          {
+            "node": "Commit Dedup State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
       ]
     }
   },

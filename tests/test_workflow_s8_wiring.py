@@ -110,11 +110,90 @@ def test_eod_branch_uses_registry_runner_and_reuses_telegram_nodes() -> None:
     assert _edge_targets(workflow, "If EOD Survivors", output_index=0) == [
         "Prepare EOD Digest for Telegram"
     ]
-    assert _edge_targets(workflow, "If EOD Survivors", output_index=1) == []
+    # Sprint 3 two-phase: EOD uses a dedicated Telegram output ending in commit;
+    # the false branch commits too, both gated by the run_id guard node.
+    assert _edge_targets(workflow, "If EOD Survivors", output_index=1) == [
+        "Has Run Id"
+    ]
     assert _edge_targets(workflow, "Prepare EOD Digest for Telegram") == [
-        "Aggregate for Telegram"
+        "Split EOD for Telegram"
     ]
     assert _edge_targets(workflow, "Aggregate for Telegram") == ["Split for Telegram"]
+
+
+def test_two_phase_commit_node_wiring() -> None:
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    commit = nodes["Commit Dedup State"]
+    assert commit["type"] == "n8n-nodes-base.executeCommand"
+    command = commit["parameters"]["command"]
+    assert "dedup_admin commit" in command
+    assert "--run-id" in command
+    assert "Parse EOD Anomaly Result" in command  # run_id sourced from parse node
+    assert ".run_id" in command
+
+    # EOD send path reaches commit only after the dedicated EOD Telegram send,
+    # via the run_id guard node.
+    assert _edge_targets(workflow, "Split EOD for Telegram") == ["Send EOD Telegram"]
+    assert _edge_targets(workflow, "Send EOD Telegram") == ["Has Run Id"]
+    assert "Commit Dedup State" in _reachable(workflow, "If EOD Survivors")
+
+
+def test_executecommand_expressions_are_prefixed_with_equals() -> None:
+    """Any executeCommand carrying an {{ }} expression MUST start with '=',
+    else n8n passes the literal braces to the shell (commit would never run)."""
+    workflow = _workflow()
+    for node in workflow["nodes"]:
+        if node["type"] != "n8n-nodes-base.executeCommand":
+            continue
+        command = node["parameters"]["command"]
+        if "{{" in command:
+            assert command.startswith("="), (
+                f"{node['name']} has an expression but no '=' prefix"
+            )
+
+
+def test_run_id_guard_before_commit_on_both_branches() -> None:
+    """run_id-null runs (dry-run / deploy validation) must not reach Commit."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    guard = nodes["Has Run Id"]
+    assert guard["type"] == "n8n-nodes-base.if"
+    payload = json.dumps(guard["parameters"])
+    assert ".run_id" in payload  # guard tests the run_id
+    assert "notEmpty" in payload
+
+    # Both paths funnel through the guard; only its true branch reaches commit.
+    assert _edge_targets(workflow, "Send EOD Telegram") == ["Has Run Id"]
+    assert _edge_targets(workflow, "If EOD Survivors", output_index=1) == ["Has Run Id"]
+    assert _edge_targets(workflow, "Has Run Id", output_index=0) == ["Commit Dedup State"]
+    assert _edge_targets(workflow, "Has Run Id", output_index=1) == []
+
+
+def test_commit_not_reachable_from_macro_or_shared_telegram() -> None:
+    """Commit must be EOD-exclusive: a macro-brief send must not trigger it."""
+    workflow = _workflow()
+
+    macro_reach = _reachable(workflow, "Macro Brief Schedule 16h Mon-Fri")
+    assert "Commit Dedup State" not in macro_reach
+    # Shared Telegram chain (used by macro) does not reach commit.
+    assert "Commit Dedup State" not in _reachable(workflow, "Aggregate for Telegram")
+    # EOD no longer flows into the shared aggregate node.
+    assert "Aggregate for Telegram" not in _reachable(workflow, "If EOD Survivors")
+
+
+def test_eod_send_path_is_dedicated_not_shared() -> None:
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    send_eod = nodes["Send EOD Telegram"]
+    assert send_eod["type"] == "n8n-nodes-base.telegram"
+    # Dedicated EOD Telegram carries its own credentials (cloned from shared send).
+    assert "credentials" in send_eod
+    # Shared Send Telegram is now fed only by the macro/news chain.
+    assert "Send Telegram" not in _reachable(workflow, "If EOD Survivors")
 
 
 def test_eod_branch_has_no_llm_or_warren_before_survivor_gate() -> None:
@@ -141,7 +220,47 @@ def test_deploy_trigger_exercises_news_and_eod_branches() -> None:
 
     assert _edge_targets(workflow, "Execute Trigger (deploy)") == [
         "Read Tickers",
-        "Run EOD Anomaly Pipeline S0-S7",
+        "Run EOD Pipeline (deploy dry-run)",
+    ]
+
+
+def test_deploy_trigger_no_longer_points_at_prod_eod_node() -> None:
+    """Deploy validation must not touch the real (state-mutating) EOD node."""
+    workflow = _workflow()
+    assert "Run EOD Anomaly Pipeline S0-S7" not in _edge_targets(
+        workflow, "Execute Trigger (deploy)"
+    )
+
+
+def test_deploy_dry_run_node_uses_dry_run_and_skip_warren() -> None:
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    node = nodes["Run EOD Pipeline (deploy dry-run)"]
+    assert node["type"] == "n8n-nodes-base.executeCommand"
+    command = node["parameters"]["command"]
+    assert "python3 -m market_intelligence.eod_orchestrator" in command
+    assert "--dry-run" in command
+    assert "--skip-warren" in command
+
+    # Still walks the shared EOD chain (parse/gate), just without side effects.
+    assert _edge_targets(workflow, "Run EOD Pipeline (deploy dry-run)") == [
+        "Parse EOD Anomaly Result"
+    ]
+
+
+def test_prod_eod_node_is_not_dry_run() -> None:
+    """The 21:30 cron path must still persist state (no dry-run flags)."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    command = nodes["Run EOD Anomaly Pipeline S0-S7"]["parameters"]["command"]
+    assert "--dry-run" not in command
+    assert "--skip-warren" not in command
+    assert "--history-days 280" in command
+
+    assert _edge_targets(workflow, "Layer B EOD Schedule 21h30 UTC") == [
+        "Run EOD Anomaly Pipeline S0-S7"
     ]
 
 

@@ -3,10 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
-from typing import Final
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Final, Protocol
 
+import fcntl
 import pandas as pd
 
 from market_intelligence.anomaly_signals import AnomalySignals, calculate_all
@@ -14,7 +18,10 @@ from market_intelligence.beta_gate import calculate_all as calculate_beta_gates
 from market_intelligence.candidate_alerts import CandidateAlert
 from market_intelligence.candidate_alerts import evaluate_all as evaluate_candidates
 from market_intelligence.dedup_hysteresis import DeduplicatedAlert
+from market_intelligence.dedup_hysteresis import SuppressionDetail
+from market_intelligence.dedup_hysteresis import dedup_readonly_env
 from market_intelligence.dedup_hysteresis import deduplicate_alerts
+from market_intelligence.dedup_hysteresis import default_pending_path
 from market_intelligence.fetch_eod import fetch_all
 from market_intelligence.macro_snapshot import (
     MacroSnapshot,
@@ -31,15 +38,58 @@ from market_intelligence.warren_alert_research import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_HISTORY_DAYS: Final[int] = 280
+_RUNS_LOG_PATH: Final[Path] = (
+    Path(__file__).parent.parent / "runtime" / "market_intelligence" / "runs.jsonl"
+)
 
 FrameFetcher = Callable[[int], dict[str, pd.DataFrame]]
 ShortInterestFetcher = Callable[[Registry], dict[str, ShortInterestResult]]
-Deduplicator = Callable[
-    [dict[str, CandidateAlert], dict[str, ShortInterestResult]],
-    tuple[DeduplicatedAlert, ...],
-]
+
+
+class Deduplicator(Protocol):
+    """Filter S3 candidates through S5 hysteresis, optionally read-only."""
+
+    def __call__(
+        self,
+        decisions: dict[str, CandidateAlert],
+        short_interest: dict[str, ShortInterestResult],
+        *,
+        readonly: bool = False,
+        pending_path: Path | None = None,
+        run_id: str | None = None,
+        run_as_of: str | None = None,
+        suppressions: list[SuppressionDetail] | None = None,
+    ) -> tuple[DeduplicatedAlert, ...]: ...
+
+
 AlertAnalyzer = Callable[[Sequence[object]], tuple[WarrenAlertAnalysis, ...]]
 MacroBuilder = Callable[[Mapping[str, pd.DataFrame], Registry | None], MacroSnapshot]
+
+
+@dataclass(frozen=True)
+class CandidateDetail:
+    """Explain the fate of one evaluated ticker (Epic 2 observability).
+
+    ``outcome`` is ``survived``, ``gated_dedup:<reason>`` or ``not_candidate`` so the
+    JSON alone answers "why did I receive nothing?".
+    """
+
+    ticker: str
+    z_resid: float | None
+    residual_threshold: float | None
+    signal_types: tuple[str, ...]
+    outcome: str
+    data_issues: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "ticker": self.ticker,
+            "z_resid": self.z_resid,
+            "residual_threshold": self.residual_threshold,
+            "signal_types": list(self.signal_types),
+            "outcome": self.outcome,
+            "data_issues": list(self.data_issues),
+        }
 
 
 @dataclass(frozen=True)
@@ -55,6 +105,10 @@ class EodRunResult:
     should_send: bool
     digest: str
     data_issues: tuple[str, ...]
+    dry_run: bool
+    run_id: str | None
+    pending_state_path: str | None
+    candidates_detail: tuple[CandidateDetail, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return an n8n-friendly JSON payload."""
@@ -62,6 +116,9 @@ class EodRunResult:
         payload["expected_symbols"] = list(self.expected_symbols)
         payload["fetched_symbols"] = list(self.fetched_symbols)
         payload["data_issues"] = list(self.data_issues)
+        payload["candidates_detail"] = [
+            detail.to_dict() for detail in self.candidates_detail
+        ]
         return payload
 
 
@@ -98,8 +155,65 @@ def _expected_as_of(signals: Mapping[str, AnomalySignals]) -> str | None:
 def _default_deduplicator(
     decisions: dict[str, CandidateAlert],
     short_interest: dict[str, ShortInterestResult],
+    *,
+    readonly: bool = False,
+    pending_path: Path | None = None,
+    run_id: str | None = None,
+    run_as_of: str | None = None,
+    suppressions: list[SuppressionDetail] | None = None,
 ) -> tuple[DeduplicatedAlert, ...]:
-    return deduplicate_alerts(decisions, short_interest)
+    return deduplicate_alerts(
+        decisions,
+        short_interest,
+        readonly=readonly,
+        pending_path=pending_path,
+        run_id=run_id,
+        run_as_of=run_as_of,
+        suppressions=suppressions,
+    )
+
+
+def _build_candidates_detail(
+    decisions: Mapping[str, CandidateAlert],
+    survivors: Sequence[DeduplicatedAlert],
+    suppressions: Sequence[SuppressionDetail],
+) -> tuple[CandidateDetail, ...]:
+    """Explain each evaluated ticker's fate for the enriched output (Epic 2)."""
+    survivor_tickers = {survivor.candidate.ticker for survivor in survivors}
+    reason_by_ticker = {item.ticker: item.reason for item in suppressions}
+    details: list[CandidateDetail] = []
+    for ticker, decision in decisions.items():
+        if ticker in survivor_tickers:
+            outcome = "survived"
+        elif decision.is_candidate:
+            reason = reason_by_ticker.get(ticker, "unknown")
+            outcome = f"gated_dedup:{reason}"
+        else:
+            outcome = "not_candidate"
+        details.append(
+            CandidateDetail(
+                ticker=ticker,
+                z_resid=decision.z_resid,
+                residual_threshold=decision.residual_threshold,
+                signal_types=tuple(decision.signal_types),
+                outcome=outcome,
+                data_issues=tuple(decision.data_issues),
+            )
+        )
+    return tuple(details)
+
+
+def append_run_log(record: Mapping[str, object], path: Path = _RUNS_LOG_PATH) -> None:
+    """Append exactly one JSONL line for this run (atomic under an exclusive flock)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
+    with path.open("a", encoding="utf-8") as log_file:
+        fcntl.flock(log_file.fileno(), fcntl.LOCK_EX)
+        try:
+            log_file.write(line)
+            log_file.flush()
+        finally:
+            fcntl.flock(log_file.fileno(), fcntl.LOCK_UN)
 
 
 def _default_analyzer(
@@ -168,8 +282,28 @@ def run_eod_anomaly_pipeline(
     deduplicator: Deduplicator = _default_deduplicator,
     analyzer: AlertAnalyzer = _default_analyzer,
     macro_builder: MacroBuilder | None = None,
+    dry_run: bool = False,
+    skip_warren: bool = False,
+    journal_path: Path | None = None,
 ) -> EodRunResult:
-    """Run S0-S7 once in the Sprint 8 deployment order."""
+    """Run S0-S7 once in the Sprint 8 deployment order.
+
+    ``dry_run`` (or the ``ANOMALY_DEDUP_READONLY`` env var) forwards read-only
+    mode to S5 so the dedup state file is never mutated. ``skip_warren`` bypasses
+    the S6/S7 macro+Warren stage for fast, LLM-free survivor checks.
+
+    ``skip_warren`` requires read-only mode: committing dedup state while
+    suppressing the digest would latch survivors as "alerted" without ever
+    sending anything — the exact incident class this epic prevents. Raises
+    ``ValueError`` on that unsafe combination before any fetch runs.
+    """
+    effective_dry_run = dry_run or dedup_readonly_env()
+    if skip_warren and not effective_dry_run:
+        raise ValueError(
+            "skip_warren requires dry-run mode (--dry-run or "
+            "ANOMALY_DEDUP_READONLY=1): skipping Warren while committing dedup "
+            "state would latch survivors without sending any alert."
+        )
     ticker_registry = registry or load_registry()
     expected_symbols = _portfolio_symbols(ticker_registry)
     frames = frame_fetcher(history_days)
@@ -189,18 +323,39 @@ def run_eod_anomaly_pipeline(
         expected_symbols=expected_symbols,
     )
     short_interest = short_interest_fetcher(ticker_registry)
-    survivors = deduplicator(decisions, short_interest)
-
-    macro_cache = MacroSnapshotCache()
-    _build_macro_once(macro_cache, frames, ticker_registry, macro_builder)
-    enriched = _attach_cached_macro(
-        survivors,
-        frames,
-        macro_cache,
-        ticker_registry,
-        macro_builder,
+    # Two-phase commit: the official run stages its computed state to a pending
+    # file (promoted by dedup_admin after Telegram send). Dry-run stages nothing.
+    if effective_dry_run:
+        run_id: str | None = None
+        pending_path: Path | None = None
+    else:
+        run_id = uuid.uuid4().hex
+        pending_path = default_pending_path()
+    suppressions: list[SuppressionDetail] = []
+    survivors = deduplicator(
+        decisions,
+        short_interest,
+        readonly=effective_dry_run,
+        pending_path=pending_path,
+        run_id=run_id,
+        run_as_of=as_of,
+        suppressions=suppressions,
     )
-    analyses = analyzer(enriched)
+    candidates_detail = _build_candidates_detail(decisions, survivors, suppressions)
+
+    if skip_warren:
+        analyses: tuple[WarrenAlertAnalysis, ...] = ()
+    else:
+        macro_cache = MacroSnapshotCache()
+        _build_macro_once(macro_cache, frames, ticker_registry, macro_builder)
+        enriched = _attach_cached_macro(
+            survivors,
+            frames,
+            macro_cache,
+            ticker_registry,
+            macro_builder,
+        )
+        analyses = analyzer(enriched)
     digest = format_digest(analyses, as_of=as_of)
 
     issues = list(_missing_frame_issues(frames, ticker_registry))
@@ -213,7 +368,7 @@ def run_eod_anomaly_pipeline(
         len(analyses),
         len(issues),
     )
-    return EodRunResult(
+    result = EodRunResult(
         as_of=as_of,
         expected_symbols=expected_symbols,
         fetched_symbols=tuple(sorted(frames)),
@@ -223,13 +378,45 @@ def run_eod_anomaly_pipeline(
         should_send=bool(digest),
         digest=digest,
         data_issues=tuple(dict.fromkeys(issues)),
+        dry_run=effective_dry_run,
+        run_id=run_id,
+        pending_state_path=str(pending_path) if pending_path is not None else None,
+        candidates_detail=candidates_detail,
     )
+    if journal_path is not None:
+        append_run_log(_run_log_record(result), journal_path)
+    return result
+
+
+def _run_log_record(result: EodRunResult) -> dict[str, object]:
+    """Project one run into a JSONL journal record (Epic 2)."""
+    payload = result.to_dict()
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "as_of": result.as_of,
+        "dry_run": result.dry_run,
+        "candidate_count": result.candidate_count,
+        "survivor_count": result.survivor_count,
+        "candidates_detail": payload["candidates_detail"],
+        "data_issues": list(result.data_issues),
+        "should_send": result.should_send,
+    }
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Sprint 8 EOD anomaly pipeline.")
     parser.add_argument("--history-days", type=int, default=DEFAULT_HISTORY_DAYS)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run the full pipeline without persisting dedup state.",
+    )
+    parser.add_argument(
+        "--skip-warren",
+        action="store_true",
+        help="Skip the S6/S7 macro+Warren stage (no LLM calls).",
+    )
     return parser.parse_args()
 
 
@@ -240,7 +427,12 @@ def main() -> None:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    result = run_eod_anomaly_pipeline(history_days=args.history_days)
+    result = run_eod_anomaly_pipeline(
+        history_days=args.history_days,
+        dry_run=args.dry_run,
+        skip_warren=args.skip_warren,
+        journal_path=_RUNS_LOG_PATH,
+    )
     print(json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True))
 
 
