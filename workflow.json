@@ -134,7 +134,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ news: $json.news }) }}",
-        "options": {}
+        "options": {
+          "timeout": 240000
+        }
       },
       "id": "node-call-filter",
       "name": "Call Warren Filter",
@@ -208,7 +210,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ newTickers: $json.newTickers, allNews: $json.allNews }) }}",
-        "options": {}
+        "options": {
+          "timeout": 240000
+        }
       },
       "id": "node-call-memorize",
       "name": "Call Memorize",
@@ -261,6 +265,9 @@
       "name": "Send Telegram",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
       "position": [
         3320,
         440
@@ -424,6 +431,9 @@
       "name": "Send EOD Telegram",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
       "position": [
         1680,
         760
@@ -517,7 +527,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={}",
-        "options": {}
+        "options": {
+          "timeout": 240000
+        }
       },
       "id": "node-call-macro-brief",
       "name": "Call Warren Macro Brief",
