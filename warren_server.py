@@ -11,6 +11,7 @@ from __future__ import annotations
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import asyncio
 import datetime
+import html
 import json
 import logging
 import os
@@ -398,7 +399,9 @@ class Handler(BaseHTTPRequestHandler):
             logger.error("handle_macro_brief failed: %s", exc)
             brief = f"Erreur lors de la génération du brief macro : {exc}"
 
-        return json.dumps({"brief": brief})
+        # Producer-side HTML escaping: Send Telegram runs parse_mode=HTML, so the
+        # macro-brief prose must be escaped here (not in the n8n Code node).
+        return json.dumps({"brief": html.escape(brief)})
 
     def log_message(self, *_):
         """Silence default HTTPServer request logging."""

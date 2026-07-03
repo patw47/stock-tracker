@@ -674,7 +674,8 @@ def test_macro_snapshot_is_reused_for_multiple_survivors(monkeypatch) -> None:
 
     assert macro_calls == 1
     assert seen_snapshot_ids == [id(snapshot), id(snapshot)]
-    assert result.digest.count("## ") == 2
+    # HTML format: 1 header <b> block + 2 per-ticker <b> blocks.
+    assert result.digest.count("</b>") == 3
 
 
 def test_missing_and_empty_ticker_frames_are_surfaced(monkeypatch) -> None:
@@ -720,7 +721,60 @@ def test_format_digest_returns_one_digest_for_all_analyses() -> None:
         as_of="2026-06-02",
     )
 
-    assert digest.startswith("# EOD anomaly digest - 2026-06-02")
+    assert "<b>EOD anomaly digest — 2026-06-02</b>" in digest
     assert "Survivors: 2" in digest
-    assert "## 1. AAA" in digest
-    assert "## 2. BBB" in digest
+    assert "<b>1. AAA</b>" in digest
+    assert "<b>2. BBB</b>" in digest
+    assert "#" not in digest
+
+
+def test_format_digest_escapes_html_and_keeps_bold_balanced() -> None:
+    analyses = (
+        WarrenAlertAnalysis(  # type: ignore[arg-type]
+            "A<B", "prompt", "a < b & c > d _under_ *star* `tick`", None
+        ),
+        WarrenAlertAnalysis("C&D", "prompt", "plain prose", None),  # type: ignore[arg-type]
+    )
+    digest = orchestrator.format_digest(analyses, as_of="2026-06-02")
+
+    # Special chars from prose/ticker are HTML-escaped.
+    assert "&lt;" in digest and "&gt;" in digest and "&amp;" in digest
+    assert "A&lt;B" in digest and "C&amp;D" in digest
+    # Bold tags balanced; the only raw '<' are the intended <b>/</b> tags.
+    assert digest.count("<b>") == digest.count("</b>") > 0
+    stripped = digest.replace("<b>", "").replace("</b>", "")
+    assert "<" not in stripped and ">" not in stripped
+
+
+def test_format_digest_has_no_markdown_heading() -> None:
+    digest = orchestrator.format_digest(
+        (WarrenAlertAnalysis("AAA", "prompt", "AAA analysis", None),),  # type: ignore[arg-type]
+        as_of="2026-06-02",
+    )
+    assert "#" not in digest
+
+
+def test_split_telegram_html_keeps_bold_balanced_across_chunks() -> None:
+    analyses = tuple(
+        WarrenAlertAnalysis(f"T{i}", "prompt", "prose " * 20, None)  # type: ignore[arg-type]
+        for i in range(60)
+    )
+    digest = orchestrator.format_digest(analyses, as_of="2026-06-02")
+    assert len(digest) > 4000
+
+    chunks = orchestrator.split_telegram_html(digest, limit=4000)
+
+    assert len(chunks) >= 2
+    for chunk in chunks:
+        assert len(chunk) <= 4000
+        assert chunk.count("<b>") == chunk.count("</b>")  # no orphan tag
+
+
+def test_split_telegram_html_degrades_oversized_paragraph_to_plaintext() -> None:
+    oversized = "<b>1. AAA</b> " + "x" * 5000  # single paragraph, no \n\n
+    chunks = orchestrator.split_telegram_html(oversized, limit=4000)
+
+    assert len(chunks) >= 2
+    for chunk in chunks:
+        assert len(chunk) <= 4000
+        assert "<" not in chunk  # tags stripped -> plain text fallback

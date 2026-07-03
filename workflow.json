@@ -14,7 +14,7 @@
         }
       },
       "id": "node-schedule",
-      "name": "Layer A News Schedule 16h Mon-Fri",
+      "name": "Layer A News Schedule 14:00 UTC Mon-Fri",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -236,7 +236,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const text = $input.first().json.text || \"Aucune actualité pertinente aujourd'hui.\";\nconst MAX = 4000;\n\nif (text.length <= MAX) {\n  return [{ json: { chunk: text } }];\n}\n\nconst paragraphs = text.split(/\\n\\n+/);\nconst chunks = [];\nlet current = '';\n\nfor (const para of paragraphs) {\n  const candidate = current ? current + '\\n\\n' + para : para;\n  if (candidate.length > MAX) {\n    if (current) chunks.push(current);\n    current = para.length > MAX ? para.slice(0, MAX) : para;\n  } else {\n    current = candidate;\n  }\n}\nif (current) chunks.push(current);\n\nreturn chunks.map((chunk, i) => ({\n  json: { chunk: chunks.length > 1 ? '_(' + (i+1) + '/' + chunks.length + ')_\\n\\n' + chunk : chunk }\n}));",
+        "jsCode": "const text = $input.first().json.text || \"Aucune actualité pertinente aujourd'hui.\";\nconst MAX = 4000;\nfunction stripTags(s){ return s.replace(/<[^>]+>/g, ''); }\nif (text.length <= MAX) {\n  return [{ json: { chunk: text } }];\n}\nconst paragraphs = text.split(/\\n\\n+/);\nconst chunks = [];\nlet current = '';\nfor (const para of paragraphs) {\n  const candidate = current ? current + '\\n\\n' + para : para;\n  if (candidate.length <= MAX) { current = candidate; continue; }\n  if (current) { chunks.push(current); current = ''; }\n  if (para.length <= MAX) { current = para; }\n  else {\n    const plain = stripTags(para);\n    for (let i = 0; i < plain.length; i += MAX) chunks.push(plain.slice(i, i + MAX));\n  }\n}\nif (current) chunks.push(current);\nreturn chunks.map((chunk) => ({ json: { chunk } }));\n",
         "mode": "runOnceForAllItems"
       },
       "id": "node-split-telegram",
@@ -253,7 +253,7 @@
         "chatId": "1543956122",
         "text": "={{ $json.chunk }}",
         "additionalFields": {
-          "parse_mode": "Markdown",
+          "parse_mode": "HTML",
           "appendAttribution": false
         }
       },
@@ -400,7 +400,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const text = $input.first().json.text || \"Aucune actualité pertinente aujourd'hui.\";\nconst MAX = 4000;\n\nif (text.length <= MAX) {\n  return [{ json: { chunk: text } }];\n}\n\nconst paragraphs = text.split(/\\n\\n+/);\nconst chunks = [];\nlet current = '';\n\nfor (const para of paragraphs) {\n  const candidate = current ? current + '\\n\\n' + para : para;\n  if (candidate.length > MAX) {\n    if (current) chunks.push(current);\n    current = para.length > MAX ? para.slice(0, MAX) : para;\n  } else {\n    current = candidate;\n  }\n}\nif (current) chunks.push(current);\n\nreturn chunks.map((chunk, i) => ({\n  json: { chunk: chunks.length > 1 ? '_(' + (i+1) + '/' + chunks.length + ')_\\n\\n' + chunk : chunk }\n}));"
+        "jsCode": "const text = $input.first().json.text || \"Aucune actualité pertinente aujourd'hui.\";\nconst MAX = 4000;\nfunction stripTags(s){ return s.replace(/<[^>]+>/g, ''); }\nif (text.length <= MAX) {\n  return [{ json: { chunk: text } }];\n}\nconst paragraphs = text.split(/\\n\\n+/);\nconst chunks = [];\nlet current = '';\nfor (const para of paragraphs) {\n  const candidate = current ? current + '\\n\\n' + para : para;\n  if (candidate.length <= MAX) { current = candidate; continue; }\n  if (current) { chunks.push(current); current = ''; }\n  if (para.length <= MAX) { current = para; }\n  else {\n    const plain = stripTags(para);\n    for (let i = 0; i < plain.length; i += MAX) chunks.push(plain.slice(i, i + MAX));\n  }\n}\nif (current) chunks.push(current);\nreturn chunks.map((chunk) => ({ json: { chunk } }));\n"
       },
       "id": "node-eod-split",
       "name": "Split EOD for Telegram",
@@ -416,7 +416,7 @@
         "chatId": "1543956122",
         "text": "={{ $json.chunk }}",
         "additionalFields": {
-          "parse_mode": "Markdown",
+          "parse_mode": "HTML",
           "appendAttribution": false
         }
       },
@@ -493,7 +493,7 @@
         }
       },
       "id": "node-macro-brief-schedule",
-      "name": "Macro Brief Schedule 16h Mon-Fri",
+      "name": "Macro Brief Schedule 14:00 UTC Mon-Fri",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -719,17 +719,6 @@
         ]
       ]
     },
-    "Layer A News Schedule 16h Mon-Fri": {
-      "main": [
-        [
-          {
-            "node": "Read Tickers",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Layer B EOD Schedule 21h30 UTC": {
       "main": [
         [
@@ -786,17 +775,6 @@
         [
           {
             "node": "Split EOD for Telegram",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Macro Brief Schedule 16h Mon-Fri": {
-      "main": [
-        [
-          {
-            "node": "Call Warren Macro Brief",
             "type": "main",
             "index": 0
           }
@@ -897,6 +875,28 @@
         [
           {
             "node": "Aggregate for Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Layer A News Schedule 14:00 UTC Mon-Fri": {
+      "main": [
+        [
+          {
+            "node": "Read Tickers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Macro Brief Schedule 14:00 UTC Mon-Fri": {
+      "main": [
+        [
+          {
+            "node": "Call Warren Macro Brief",
             "type": "main",
             "index": 0
           }

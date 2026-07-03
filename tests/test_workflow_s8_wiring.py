@@ -37,7 +37,7 @@ def _reachable(workflow: dict, source: str) -> set[str]:
 def test_legacy_warren_news_layer_remains_connected() -> None:
     workflow = _workflow()
 
-    assert _edge_targets(workflow, "Layer A News Schedule 16h Mon-Fri") == [
+    assert _edge_targets(workflow, "Layer A News Schedule 14:00 UTC Mon-Fri") == [
         "Read Tickers"
     ]
     assert _edge_targets(workflow, "Read Tickers") == ["Prepare Haiku Request"]
@@ -179,7 +179,7 @@ def test_commit_not_reachable_from_macro_or_shared_telegram() -> None:
     """Commit must be EOD-exclusive: a macro-brief send must not trigger it."""
     workflow = _workflow()
 
-    macro_reach = _reachable(workflow, "Macro Brief Schedule 16h Mon-Fri")
+    macro_reach = _reachable(workflow, "Macro Brief Schedule 14:00 UTC Mon-Fri")
     assert "Commit Dedup State" not in macro_reach
     # Shared Telegram chain (used by macro) does not reach commit.
     assert "Commit Dedup State" not in _reachable(workflow, "Aggregate for Telegram")
@@ -272,19 +272,19 @@ def test_macro_brief_schedule_wired_to_telegram() -> None:
     workflow = _workflow()
     nodes = _nodes_by_name(workflow)
 
-    schedule = nodes["Macro Brief Schedule 16h Mon-Fri"]
+    schedule = nodes["Macro Brief Schedule 14:00 UTC Mon-Fri"]
     # 14:00 UTC = 16h Paris (été), sous settings.timezone=UTC.
     assert schedule["parameters"]["rule"]["interval"][0]["expression"] == "0 14 * * 1-5"
     assert "timezone" not in schedule["parameters"]
 
-    assert _edge_targets(workflow, "Macro Brief Schedule 16h Mon-Fri") == [
+    assert _edge_targets(workflow, "Macro Brief Schedule 14:00 UTC Mon-Fri") == [
         "Call Warren Macro Brief"
     ]
     assert _edge_targets(workflow, "Call Warren Macro Brief") == ["Extract Macro Brief"]
     assert _edge_targets(workflow, "Extract Macro Brief") == ["Aggregate for Telegram"]
 
     # Macro brief path must NOT contain Layer A news nodes (independent pipeline)
-    reachable = _reachable(workflow, "Macro Brief Schedule 16h Mon-Fri")
+    reachable = _reachable(workflow, "Macro Brief Schedule 14:00 UTC Mon-Fri")
     assert "Read Tickers" not in reachable
     assert "Claude Haiku API" not in reachable
     assert "If New Items" not in reachable
@@ -293,6 +293,31 @@ def test_macro_brief_schedule_wired_to_telegram() -> None:
     assert "Aggregate for Telegram" in reachable
     assert "Split for Telegram" in reachable
     assert "Send Telegram" in reachable
+
+
+def test_schedule_labels_use_utc_not_16h() -> None:
+    """Epic 3 S1: crons are UTC (0 14 = 14:00 UTC), labels must not say 16h."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    assert all("16h" not in node["name"] for node in workflow["nodes"])
+    for name in (
+        "Layer A News Schedule 14:00 UTC Mon-Fri",
+        "Macro Brief Schedule 14:00 UTC Mon-Fri",
+    ):
+        assert name in nodes
+        assert (
+            nodes[name]["parameters"]["rule"]["interval"][0]["expression"]
+            == "0 14 * * 1-5"
+        )
+
+
+def test_send_telegram_nodes_use_html_parse_mode() -> None:
+    """Escaped HTML payload requires parse_mode HTML on every Telegram send."""
+    workflow = _workflow()
+    for node in workflow["nodes"]:
+        if node["type"] == "n8n-nodes-base.telegram":
+            assert node["parameters"]["additionalFields"]["parse_mode"] == "HTML"
 
 
 def test_weekly_heartbeat_friday_wired_to_shared_telegram() -> None:
