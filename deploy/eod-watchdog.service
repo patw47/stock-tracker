@@ -1,0 +1,10 @@
+[Unit]
+Description=Stock Tracker EOD watchdog (alert if the 21:30 UTC EOD run is missing/failed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=queenp
+WorkingDirectory=/opt/apps/stock-tracker
+ExecStart=/usr/bin/python3 /opt/apps/stock-tracker/deploy/watchdog_eod.py

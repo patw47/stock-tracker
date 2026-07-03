@@ -72,16 +72,27 @@ if [ "$oc_active" = "active" ] && [ "$ws_active" = "active" ] && [ "$warren_http
   warren_status="active"
 fi
 
+# 5b. Watchdog EOD (Epic 2 S2) : installe/active le timer systemd. Indépendant de
+#     n8n — alerte Telegram si le run 21:30 UTC manque. N'influence pas overall
+#     (garde-fou externe) mais son état est rapporté via STATUS_WATCHDOG_TIMER.
+log "install/enable watchdog EOD timer"
+sudo cp "$REPO/deploy/eod-watchdog.service" /etc/systemd/system/eod-watchdog.service
+sudo cp "$REPO/deploy/eod-watchdog.timer"   /etc/systemd/system/eod-watchdog.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now eod-watchdog.timer >/dev/null 2>&1
+wd_timer=$(systemctl is-active eod-watchdog.timer 2>/dev/null || echo inactive)
+
 overall="ok"
 if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
    || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ]; then
   overall="fail"
 fi
 
-log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) import_rc=$import_rc"
+log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) watchdog_timer=$wd_timer import_rc=$import_rc"
 
 # Lignes machine-lisibles consommées par deploy.yml.
 echo "STATUS_STOCK_TRACKER=$st_active"
 echo "STATUS_N8N_HEALTH=$n8n_health"
 echo "STATUS_WARREN=$warren_status"
+echo "STATUS_WATCHDOG_TIMER=$wd_timer"
 echo "STATUS_OVERALL=$overall"
