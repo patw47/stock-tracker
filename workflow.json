@@ -601,6 +601,53 @@
         40,
         1180
       ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 22 1-7 * 5"
+            }
+          ]
+        }
+      },
+      "id": "node-monthly-report-schedule",
+      "name": "Monthly Report Schedule 1er Vendredi 22h UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "command": "cd /opt/apps/stock-tracker && python3 -m market_intelligence.monthly_report"
+      },
+      "id": "node-monthly-report-runner",
+      "name": "Run Monthly Report",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -180,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { warrenText: ($json.stdout || '').trim() } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "node-monthly-report-prep",
+      "name": "Prepare Monthly Report for Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40,
+        1360
+      ]
     }
   ],
   "connections": {
@@ -883,6 +930,39 @@
       ]
     },
     "Prepare Heartbeat for Telegram": {
+      "main": [
+        [
+          {
+            "node": "Aggregate for Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monthly Report Schedule 1er Vendredi 22h UTC": {
+      "main": [
+        [
+          {
+            "node": "Run Monthly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Monthly Report": {
+      "main": [
+        [
+          {
+            "node": "Prepare Monthly Report for Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Monthly Report for Telegram": {
       "main": [
         [
           {
