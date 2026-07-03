@@ -1,0 +1,10 @@
+[Unit]
+Description=Stock Tracker outcome tracker (J+1/J+5/J+20 returns of past alerts, off critical path)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=queenp
+WorkingDirectory=/opt/apps/stock-tracker
+ExecStart=/usr/bin/python3 -m market_intelligence.outcome_tracker
