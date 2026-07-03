@@ -193,6 +193,26 @@ def _today() -> str:
     return date.today().isoformat()
 
 
+def _onboard(symbol: str):
+    """Onboard a symbol into the Layer B referentials; None if unavailable.
+
+    Fail-soft: the ticker add flow must never crash if the market_intelligence
+    package or its deps are missing on the host.
+    """
+    try:
+        from market_intelligence.ticker_onboard import onboard_ticker
+        return onboard_ticker(symbol)
+    except Exception as exc:  # pragma: no cover - defensive host guard
+        print(f"ONBOARD_UNAVAILABLE {symbol}: {exc}", file=sys.stderr)
+        return None
+
+
+def format_onboard(result) -> str:
+    """Render an onboard result for the Telegram reply."""
+    from market_intelligence.ticker_onboard import format_result
+    return format_result(result)
+
+
 def _do_add(list_name: str, raw: str) -> None:
     syms = [x.upper() for x in re.split(r"[,\s]+", raw.strip()) if x]
     if not syms:
@@ -200,14 +220,24 @@ def _do_add(list_name: str, raw: str) -> None:
         return
     data = _load(FILES[list_name])
     existing = set(_symbols(data))
-    added, skipped = [], []
+    added, skipped, refused = [], [], []
+    onboard_msgs = []
     for s in syms:
         if s in existing:
             skipped.append(s)
-        else:
-            data["tickers"].append({"symbol": s, "added": _today()})
-            existing.add(s)
-            added.append(s)
+            continue
+        # Onboard first: validates the symbol and generates the Layer B referential
+        # entries. An invalid symbol is refused before touching the runtime list.
+        result = _onboard(s)
+        if result is not None and result.status == "invalid":
+            refused.append(s)
+            onboard_msgs.append(format_onboard(result))
+            continue
+        data["tickers"].append({"symbol": s, "added": _today()})
+        existing.add(s)
+        added.append(s)
+        if result is not None:
+            onboard_msgs.append(format_onboard(result))
     if added:
         _save(FILES[list_name], data)
     clear_pending()
@@ -216,6 +246,10 @@ def _do_add(list_name: str, raw: str) -> None:
         parts.append(f"✅ <b>{', '.join(added)}</b> added to {LABEL[list_name]} ({_today()})")
     if skipped:
         parts.append(f"⚠️ already present: {', '.join(skipped)}")
+    if refused:
+        parts.append(f"⛔ refused (invalid): {', '.join(refused)}")
+    if onboard_msgs:
+        parts.append("\n" + "\n".join(onboard_msgs))
     parts.append(f"\n{EMOJI[list_name]} {LABEL[list_name]}: {_summary(data)}")
     send("\n".join(parts))
 
