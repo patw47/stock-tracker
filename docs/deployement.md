@@ -52,6 +52,131 @@ Without it the briefing silently falls back to hardcoded macro values.
 `TELEGRAM_ORCHESTRATION_CHAT_ID`, `PROJECT_NAME` (status message). No SSH secrets needed
 (self-hosted runner). Runner uses the repo-scoped `GITHUB_TOKEN` for the git fetch.
 
+## Mode dry-run du pipeline EOD (Sprint 1 — epic dédup transactionnel)
+
+Le pipeline `python -m market_intelligence.eod_orchestrator` peut être exécuté **sans
+jamais muter l'état de déduplication** (`runtime/market_intelligence/dedup_state.json`).
+C'est le garde-fou contre l'incident du 2026-07-01 : un run manuel/validation qui latche
+un ticker fait disparaître la vraie alerte du run officiel du soir.
+
+Deux leviers, **l'un ou l'autre suffit** (ils se combinent en OR) :
+
+| Levier | Effet |
+|--------|-------|
+| Flag CLI `--dry-run` | `deduplicate_alerts(readonly=True)` : les survivors sont calculés depuis l'état chargé mais `save_dedup_state` n'est **pas** appelé. Le flock exclusif est quand même pris (cohérence de lecture). |
+| Env `ANOMALY_DEDUP_READONLY=1` | Identique à `--dry-run`. Valeurs vraies : `1`, `true`, `yes`, `on` (insensible à la casse). Utile pour forcer le read-only sans toucher la ligne de commande. |
+| Flag CLI `--skip-warren` | Saute l'étage S6/S7 (macro + analyse Warren) : produit les survivors **sans appel LLM** (vérif rapide, coût nul). **Exige le dry-run** (`--dry-run` ou l'env) : sans lui, `run_eod_anomaly_pipeline` lève `ValueError` avant tout fetch — commiter l'état sans envoyer de digest latcherait les survivors comme « alertés » sans que rien ne parte (la classe d'incident visée par cet epic). |
+
+Le JSON de sortie porte un champ **`dry_run: true|false`** (vrai dès que le flag **ou**
+l'env est actif) pour que n8n et les humains sachent si l'état a été persisté.
+
+```bash
+# Vérif rapide sans effet de bord ni coût LLM
+python -m market_intelligence.eod_orchestrator --dry-run --skip-warren
+
+# Équivalent via l'environnement (ex. cron de validation)
+ANOMALY_DEDUP_READONLY=1 python -m market_intelligence.eod_orchestrator --skip-warren
+```
+
+Garantie : `save_dedup_state` est **la seule** écriture d'état persistante de tout le
+chemin S0-S7 (macro cache en mémoire, mémoire tickers S7 en lecture seule). En dry-run,
+`dedup_state.json` est inchangé octet pour octet (et n'est pas créé s'il n'existe pas).
+
+## Validation deploy sans effet de bord (Sprint 2)
+
+`Execute Trigger (deploy)` (dans `workflow.json`) ne pointe **plus** vers le nœud de
+production `Run EOD Anomaly Pipeline S0-S7`. Il exécute désormais un nœud séparé
+**`Run EOD Pipeline (deploy dry-run)`** :
+
+```
+cd /opt/apps/stock-tracker && python3 -m market_intelligence.eod_orchestrator \
+    --history-days 280 --dry-run --skip-warren
+```
+
+Ainsi chaque validation de déploiement (le `n8n execute --id` de `remote.sh`) parcourt
+toute la chaîne EOD (Parse → If EOD Survivors) **sans muter l'état dedup ni appeler le
+LLM**. `--skip-warren` force `should_send=false` → `If EOD Survivors` est toujours faux en
+validation → aucun Telegram parti. Le **cron 21:30** (`Layer B EOD Schedule 21h30 UTC`)
+reste branché sur le nœud de prod réel (sans `--dry-run`), donc l'alerte du soir persiste
+toujours son état normalement.
+
+## Outil admin de l'état dedup + reset post-incident
+
+`python3 -m market_intelligence.dedup_admin` inspecte/répare `dedup_state.json` sans édition
+JSON à la main sur le VPS :
+
+```bash
+# Voir l'état par ticker (latched/armed, direction, dernière alerte, observations…)
+python3 -m market_intelligence.dedup_admin show
+
+# Ré-armer UN ticker pollué (retire son latch, laisse les autres intacts)
+python3 -m market_intelligence.dedup_admin reset --ticker NUAI
+
+# Tout ré-armer (état vidé, schéma valide conservé)
+python3 -m market_intelligence.dedup_admin reset --all
+```
+
+Écritures via `save_dedup_state` (temp+`os.replace` atomique) sous le même flock
+(`_state_lock`) que le pipeline. Un fichier corrompu/invalide est **refusé** (exit ≠ 0,
+aucune écriture). Chemin résolu au runtime : `--state-path` > env
+`ANOMALY_DEDUP_STATE_PATH` > défaut `runtime/market_intelligence/dedup_state.json`.
+
+**Procédure post-incident** — un latch pollué = un ticker marqué « alerté » dans l'état
+alors qu'aucun Telegram n'est parti (ex. run manuel avant le patch dry-run, incident
+2026-07-01 sur NUAI). Avant le run du soir :
+
+```bash
+python3 -m market_intelligence.dedup_admin show                 # localiser le latch fautif
+python3 -m market_intelligence.dedup_admin reset --ticker NUAI  # ré-armer
+```
+
+Au run 21:30 suivant, l'anomalie refire normalement (mieux vaut un doublon qu'une alerte
+perdue). Voir l'ADR `decisions/2026-07-02_dedup-transactionnel.md`.
+
+## Commit d'état post-envoi — two-phase (Sprint 3)
+
+Le run officiel **ne remplace plus** `dedup_state.json` pendant le pipeline. Il calcule
+l'état candidat depuis l'état réel et le **stage** dans `dedup_state.pending.json`
+(schéma + `run_id` + `as_of`). Le JSON de sortie porte `run_id` + `pending_state_path`.
+L'état réel n'est promu **qu'après** confirmation d'envoi Telegram, par une étape séparée.
+
+```
+Run EOD (officiel) ──► écrit dedup_state.pending.json (run_id=R)  [réel intact]
+       │ JSON: {run_id: R, pending_state_path: …, survivor_count, should_send}
+       ▼
+If EOD Survivors ── true ──► Split EOD → Send EOD Telegram ──┐
+                └─ false ───────────────────────────────────┤
+                                                             ▼
+                                            Has Run Id (run_id non-null ?)
+                                              │ oui                │ non
+                                              ▼                    ▼
+                                     Commit Dedup State         (skip)
+                        dedup_admin commit --run-id R  (os.replace atomique)
+                        promeut pending → dedup_state.json, supprime le pending
+```
+
+**Nœud `Has Run Id`** : garde placé avant `Commit Dedup State` sur les deux chemins. La
+validation deploy (dry-run) traverse `If EOD Survivors` (branche false) avec `run_id=null` ;
+le garde bloque alors le commit (`run_id` vide → skip) au lieu de faire échouer la validation.
+
+**Préfixe `=` obligatoire** : la commande du nœud `Commit Dedup State` commence par `=` pour
+que n8n **évalue** l'expression `{{ $('Parse EOD Anomaly Result').item.json.run_id }}` (sans
+le `=`, les accolades partiraient littéralement au shell et le commit échouerait chaque
+soir). Un test wiring vérifie que toute commande `executeCommand` contenant `{{` est préfixée.
+
+- **Échec d'envoi Telegram** → le nœud `Commit Dedup State` n'est jamais atteint → le pending
+  n'est pas promu → l'état réel n'avance pas → **l'alerte refire au run suivant**.
+- **Sans survivor** (branche false) → commit immédiat : `last_observed_as_of` /
+  `latch_observations` avancent quand même (pas d'alerte à envoyer, mais l'état progresse).
+- **`dedup_admin commit --run-id R`** refuse (`rc 1`, aucune écriture) si le pending porte un
+  autre `run_id` (pending écrasé par un run plus récent) ; **no-op `rc 0`** si aucun pending
+  (idempotent : multi-chunk Telegram, ou branche deploy dry-run qui n'écrit jamais de
+  pending). Le `run_id` du nœud vient de `{{ $('Parse EOD Anomaly Result').item.json.run_id }}`.
+- **Sortie Telegram EOD dédiée** (`Send EOD Telegram`, credentials clonés) : le commit est
+  **EOD-exclusif**. Le macro-brief 16h garde la chaîne partagée `Aggregate → Split → Send
+  Telegram` et ne déclenche jamais de commit.
+- **Pending orphelin** (crash entre calcul et commit) : le run suivant recalcule **toujours
+  depuis l'état réel** (l'orphelin n'est jamais lu), l'écrase et logge un warning.
 **`NODES_EXCLUDE=[]` (REQUIS dans `.env`)** — n8n 2.20+ exclut par défaut le nœud
 `n8n-nodes-base.executeCommand`. Le workflow l'utilise (« Run EOD Anomaly Pipeline S0-S7 »
 lance `python3 -m market_intelligence.eod_orchestrator`). Sans cet override, n8n throw

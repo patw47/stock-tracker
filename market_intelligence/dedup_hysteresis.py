@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 from contextlib import contextmanager
@@ -13,6 +14,8 @@ import fcntl
 
 from market_intelligence.candidate_alerts import CandidateAlert, Direction
 from market_intelligence.short_interest import ShortInterestResult
+
+logger = logging.getLogger(__name__)
 
 FireReason = Literal[
     "initial",
@@ -34,6 +37,14 @@ _DEFAULT_STATE_PATH: Final[Path] = (
 _SCHEMA_VERSION: Final[int] = 1
 _SQUEEZE_SIGNAL: Final[str] = "squeeze_prone"
 _VALID_DIRECTIONS: Final[set[str]] = {"up", "down"}
+_READONLY_ENV_VAR: Final[str] = "ANOMALY_DEDUP_READONLY"
+_TRUTHY_ENV_VALUES: Final[set[str]] = {"1", "true", "yes", "on"}
+
+
+def dedup_readonly_env() -> bool:
+    """Return True when ANOMALY_DEDUP_READONLY requests read-only dedup."""
+    value = os.getenv(_READONLY_ENV_VAR)
+    return value is not None and value.strip().lower() in _TRUTHY_ENV_VALUES
 
 
 class DedupError(Exception):
@@ -83,6 +94,33 @@ class DeduplicatedAlert:
     squeeze_prone: bool | None
     fire_reason: FireReason
     signal_types: tuple[str, ...]
+
+
+SuppressionReason = Literal[
+    "already_observed",
+    "below_rearm",
+    "max_latch_refresh",
+    "latched_no_override",
+]
+
+
+@dataclass(frozen=True)
+class SuppressionDetail:
+    """Explain why an eligible candidate was gated by dedup (Epic 2 observability)."""
+
+    ticker: str
+    z_resid: float | None
+    reason: SuppressionReason
+
+
+def _record_suppression(
+    suppressions: list[SuppressionDetail] | None,
+    candidate: CandidateAlert,
+    reason: SuppressionReason,
+) -> None:
+    """Append a suppression detail for a gated candidate (only real candidates)."""
+    if suppressions is not None and candidate.is_candidate:
+        suppressions.append(SuppressionDetail(candidate.ticker, candidate.z_resid, reason))
 
 
 def _positive_finite(name: str, value: object) -> float:
@@ -231,6 +269,84 @@ def save_dedup_state(
         raise DedupStateError(f"Unable to save dedup state: {path}") from exc
 
 
+def _pending_path_for(state_path: Path) -> Path:
+    """Derive the two-phase pending path (dedup_state.json -> dedup_state.pending.json)."""
+    return state_path.with_name(f"{state_path.stem}.pending.json")
+
+
+def default_pending_path() -> Path:
+    """Return the pending path derived from the default (env-resolved) state path."""
+    return _pending_path_for(_DEFAULT_STATE_PATH)
+
+
+@dataclass(frozen=True)
+class PendingDedupState:
+    """Represent a candidate dedup state awaiting commit after Telegram send."""
+
+    run_id: str
+    as_of: str | None
+    tickers: dict[str, TickerDedupState]
+
+
+def save_pending_state(
+    states: dict[str, TickerDedupState],
+    path: Path,
+    *,
+    run_id: str,
+    as_of: str | None,
+) -> None:
+    """Persist a candidate dedup state (schema + run_id/as_of) atomically.
+
+    Two-phase commit stage 1: the official run stages its computed state here
+    instead of overwriting the real state file. ``dedup_admin commit`` promotes
+    it once Telegram delivery is confirmed.
+    """
+    if not run_id:
+        raise DedupStateError("Pending state requires a non-empty run_id")
+    payload = {
+        "schema_version": _SCHEMA_VERSION,
+        "run_id": run_id,
+        "as_of": as_of,
+        "tickers": {ticker: asdict(states[ticker]) for ticker in sorted(states)},
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        os.replace(temporary, path)
+    except OSError as exc:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise DedupStateError(f"Unable to save pending dedup state: {path}") from exc
+
+
+def load_pending_state(path: Path) -> PendingDedupState:
+    """Load and validate a pending dedup state. Raises on absence or corruption."""
+    if not path.exists():
+        raise DedupStateError(f"No pending dedup state: {path}")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DedupStateError(f"Unable to load pending dedup state: {path}") from exc
+    if not isinstance(raw, dict) or raw.get("schema_version") != _SCHEMA_VERSION:
+        raise DedupStateError("Invalid pending dedup state schema version")
+    run_id = raw.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise DedupStateError("Pending dedup state requires a non-empty run_id")
+    as_of = _optional_date(raw.get("as_of"), "pending.as_of")
+    tickers = raw.get("tickers")
+    if not isinstance(tickers, dict):
+        raise DedupStateError("Pending dedup state requires a tickers object")
+    states = {
+        str(ticker): _parse_state(str(ticker), state) for ticker, state in tickers.items()
+    }
+    return PendingDedupState(run_id=run_id, as_of=as_of, tickers=states)
+
+
 @contextmanager
 def _state_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_name(f".{path.name}.lock")
@@ -357,12 +473,42 @@ def deduplicate_alerts(
     *,
     state_path: Path = _DEFAULT_STATE_PATH,
     config: DedupConfig | None = None,
+    readonly: bool = False,
+    pending_path: Path | None = None,
+    run_id: str | None = None,
+    run_as_of: str | None = None,
+    suppressions: list[SuppressionDetail] | None = None,
 ) -> tuple[DeduplicatedAlert, ...]:
-    """Filter Sprint 3 candidates through persistent Sprint 5 hysteresis."""
+    """Filter Sprint 3 candidates through persistent Sprint 5 hysteresis.
+
+    When ``readonly`` is True (or the ``ANOMALY_DEDUP_READONLY`` env var is set),
+    survivors are computed from the loaded state but the state is never
+    persisted. The exclusive flock is still acquired to keep reads consistent
+    with concurrent writers.
+
+    When ``pending_path`` is given (two-phase commit, official run), the real
+    state is loaded and computed as usual but the candidate result is staged to
+    ``pending_path`` (with ``run_id``/``run_as_of``) instead of overwriting the
+    real state — the real file is committed only by ``dedup_admin commit`` after
+    Telegram delivery. ``readonly`` takes precedence (dry-run stages nothing).
+    """
+    if pending_path is not None and not readonly and not run_id:
+        raise DedupInputError("pending_path requires a non-empty run_id")
     dedup_config = config or load_dedup_config()
     squeeze_results = short_interest or {}
+    effective_readonly = readonly or dedup_readonly_env()
     with _state_lock(state_path):
-        return _deduplicate_locked(decisions, squeeze_results, state_path, dedup_config)
+        return _deduplicate_locked(
+            decisions,
+            squeeze_results,
+            state_path,
+            dedup_config,
+            readonly=effective_readonly,
+            pending_path=pending_path,
+            run_id=run_id,
+            run_as_of=run_as_of,
+            suppressions=suppressions,
+        )
 
 
 def _deduplicate_locked(
@@ -370,6 +516,12 @@ def _deduplicate_locked(
     squeeze_results: dict[str, ShortInterestResult],
     state_path: Path,
     dedup_config: DedupConfig,
+    *,
+    readonly: bool = False,
+    pending_path: Path | None = None,
+    run_id: str | None = None,
+    run_as_of: str | None = None,
+    suppressions: list[SuppressionDetail] | None = None,
 ) -> tuple[DeduplicatedAlert, ...]:
     states = load_dedup_state(state_path)
     alerts: list[DeduplicatedAlert] = []
@@ -413,6 +565,7 @@ def _deduplicate_locked(
 
         previous = states.get(ticker)
         if previous is not None and candidate.as_of <= previous.last_observed_as_of:
+            _record_suppression(suppressions, candidate, "already_observed")
             continue
         if previous is None or not previous.latched:
             if candidate.is_candidate:
@@ -433,6 +586,7 @@ def _deduplicate_locked(
         observations = previous.latch_observations + 1
         if candidate.z_resid is not None and abs(candidate.z_resid) < dedup_config.rearm_z:
             states[ticker] = _armed_state(candidate.as_of)
+            _record_suppression(suppressions, candidate, "below_rearm")
             continue
         if not candidate.is_candidate:
             states[ticker] = (
@@ -451,6 +605,7 @@ def _deduplicate_locked(
         signal_types = _effective_signal_types(candidate, squeeze)
         if observations > dedup_config.max_latch_observations:
             states[ticker] = _refreshed_latch_state(candidate, previous, signal_types)
+            _record_suppression(suppressions, candidate, "max_latch_refresh")
             continue
 
         reason = _override_reason(candidate, previous, signal_types, dedup_config)
@@ -465,6 +620,7 @@ def _deduplicate_locked(
                     "latch_observations": observations,
                 }
             )
+            _record_suppression(suppressions, candidate, "latched_no_override")
             continue
 
         merged_types = (
@@ -486,5 +642,15 @@ def _deduplicate_locked(
             )
         )
 
-    save_dedup_state(states, state_path)
+    if readonly:
+        return tuple(alerts)
+    if pending_path is not None:
+        if pending_path.exists():
+            logger.warning(
+                "Overwriting orphan pending dedup state at %s (previous run never committed)",
+                pending_path,
+            )
+        save_pending_state(states, pending_path, run_id=run_id or "", as_of=run_as_of)
+    else:
+        save_dedup_state(states, state_path)
     return tuple(alerts)
