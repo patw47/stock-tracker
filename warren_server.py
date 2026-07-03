@@ -8,7 +8,7 @@ POST /macro-brief -- daily Market Context Brief (independent of ticker news)
 """
 from __future__ import annotations
 
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import asyncio
 import datetime
 import html
@@ -51,6 +51,11 @@ WORKSPACE = "/home/warren/.openclaw/workspace-warren"
 MEMORY_DIR = os.path.join(WORKSPACE, "memory", "tickers")
 MAX_MEMORY = 3
 
+# The bridge runs on ThreadingHTTPServer, so two requests can write ticker
+# memory concurrently. write_memory is a read-modify-write on a shared file;
+# serialize it so concurrent writes of the same symbol never interleave.
+_MEMORY_LOCK = threading.Lock()
+
 
 def read_memory(symbol):
     """Return last memory entries for symbol, empty string if none."""
@@ -63,15 +68,20 @@ def read_memory(symbol):
 
 
 def write_memory(symbol, raw_news, date):
-    """Prepend raw_news entry for symbol; keep last MAX_MEMORY entries."""
+    """Prepend raw_news entry for symbol; keep last MAX_MEMORY entries.
+
+    The read-modify-write below is guarded by _MEMORY_LOCK so concurrent
+    ThreadingHTTPServer requests writing the same file cannot interleave.
+    """
     os.makedirs(MEMORY_DIR, exist_ok=True)
     path = os.path.join(MEMORY_DIR, f"{symbol}.md")
-    existing = read_memory(symbol)
-    entries = [e.strip() for e in existing.split("\n---\n") if e.strip()] if existing else []
-    entries.insert(0, f"## {date}\n{raw_news.strip()}")
-    entries = entries[:MAX_MEMORY]
-    with open(path, "w") as f:
-        f.write("\n---\n".join(entries) + "\n")
+    with _MEMORY_LOCK:
+        existing = read_memory(symbol)
+        entries = [e.strip() for e in existing.split("\n---\n") if e.strip()] if existing else []
+        entries.insert(0, f"## {date}\n{raw_news.strip()}")
+        entries = entries[:MAX_MEMORY]
+        with open(path, "w") as f:
+            f.write("\n---\n".join(entries) + "\n")
 
 
 def call_warren(message, tag):
@@ -411,7 +421,7 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     os.makedirs(MEMORY_DIR, exist_ok=True)
 
-    http_server = HTTPServer(("127.0.0.1", 18795), Handler)
+    http_server = ThreadingHTTPServer(("127.0.0.1", 18795), Handler)
     t = threading.Thread(target=http_server.serve_forever, daemon=True)
     t.start()
     print("Warren HTTP server listening on 127.0.0.1:18795")
