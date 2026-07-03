@@ -542,6 +542,53 @@
         800,
         520
       ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "50 21 * * 5"
+            }
+          ]
+        }
+      },
+      "id": "node-heartbeat-schedule",
+      "name": "Weekly Heartbeat Schedule 21h50 Vendredi",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "command": "cd /opt/apps/stock-tracker && python3 -m market_intelligence.weekly_heartbeat"
+      },
+      "id": "node-heartbeat-runner",
+      "name": "Run Weekly Heartbeat",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -180,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { warrenText: ($json.stdout || '').trim() } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "node-heartbeat-prep",
+      "name": "Prepare Heartbeat for Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40,
+        1180
+      ]
     }
   ],
   "connections": {
@@ -821,6 +868,39 @@
           }
         ],
         []
+      ]
+    },
+    "Weekly Heartbeat Schedule 21h50 Vendredi": {
+      "main": [
+        [
+          {
+            "node": "Run Weekly Heartbeat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Weekly Heartbeat": {
+      "main": [
+        [
+          {
+            "node": "Prepare Heartbeat for Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Heartbeat for Telegram": {
+      "main": [
+        [
+          {
+            "node": "Aggregate for Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },

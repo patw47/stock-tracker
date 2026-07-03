@@ -295,6 +295,39 @@ def test_macro_brief_schedule_wired_to_telegram() -> None:
     assert "Send Telegram" in reachable
 
 
+def test_weekly_heartbeat_friday_wired_to_shared_telegram() -> None:
+    """Epic 2 S3: Friday 21:50 UTC → run heartbeat → feed the shared Telegram chain."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    schedule = nodes["Weekly Heartbeat Schedule 21h50 Vendredi"]
+    assert schedule["type"] == "n8n-nodes-base.scheduleTrigger"
+    assert (
+        schedule["parameters"]["rule"]["interval"][0]["expression"] == "50 21 * * 5"
+    )
+    assert workflow["settings"]["timezone"] == "UTC"
+
+    runner = nodes["Run Weekly Heartbeat"]
+    assert runner["type"] == "n8n-nodes-base.executeCommand"
+    assert "market_intelligence.weekly_heartbeat" in runner["parameters"]["command"]
+    # No n8n expression in the command => no '=' prefix trap.
+    assert "{{" not in runner["parameters"]["command"]
+
+    assert _edge_targets(workflow, "Weekly Heartbeat Schedule 21h50 Vendredi") == [
+        "Run Weekly Heartbeat"
+    ]
+    assert _edge_targets(workflow, "Run Weekly Heartbeat") == [
+        "Prepare Heartbeat for Telegram"
+    ]
+    assert _edge_targets(workflow, "Prepare Heartbeat for Telegram") == [
+        "Aggregate for Telegram"
+    ]
+    # Reuses the shared Telegram chain and stays clear of the EOD commit path.
+    reachable = _reachable(workflow, "Weekly Heartbeat Schedule 21h50 Vendredi")
+    assert "Send Telegram" in reachable
+    assert "Commit Dedup State" not in reachable
+
+
 def test_macro_brief_call_targets_correct_endpoint() -> None:
     """Call Warren Macro Brief node POSTs to /macro-brief."""
     workflow = _workflow()
