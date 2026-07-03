@@ -44,6 +44,14 @@ N8N_DB="$N8N_DB" WORKFLOW_JSON="$REPO/workflow.json" \
   python3 "$REPO/deploy/import_workflow.py"
 import_rc=$?
 
+# 2b. Validation de cohérence des référentiels tickers (Epic 4 S1) sur les
+#     fichiers runtime réels du VPS, AVANT le restart. Une divergence
+#     (ticker sans registre / classification / facteur) => STATUS_OVERALL=fail.
+log "validate ticker referential (registry_check)"
+( cd "$REPO" && python3 -m market_intelligence.registry_check \
+    --portfolio "$REPO/portfolio.json" --watchlist "$REPO/watchlist.json" )
+registry_rc=$?
+
 # 3. Relancer la stack Warren (openclaw + bridge). Le service n8n reste ARRÊTÉ pour l'instant.
 log "restart openclaw-warren"; sudo systemctl restart openclaw-warren; sleep 2
 log "restart warren-server";  sudo systemctl restart warren-server;  sleep 3
@@ -84,11 +92,12 @@ wd_timer=$(systemctl is-active eod-watchdog.timer 2>/dev/null || echo inactive)
 
 overall="ok"
 if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
-   || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ]; then
+   || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ] \
+   || [ "$registry_rc" -ne 0 ]; then
   overall="fail"
 fi
 
-log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) watchdog_timer=$wd_timer import_rc=$import_rc"
+log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) watchdog_timer=$wd_timer import_rc=$import_rc registry_rc=$registry_rc"
 
 # Lignes machine-lisibles consommées par deploy.yml.
 echo "STATUS_STOCK_TRACKER=$st_active"
