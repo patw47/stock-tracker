@@ -19,7 +19,10 @@ HORIZONS = (1, 5, 20)
 MAX_HORIZON = max(HORIZONS)
 # Wait this many calendar days after an event before deciding it is unmeasurable;
 # below this an absent close just means "data not fetched yet", not "no data".
-READY_MIN_CALENDAR_DAYS = 28
+# 20 trading days span ~28 calendar days with no holiday, but a single NYSE
+# holiday in the window pushes the 20th close to J+29/J+30, so 28 would freeze
+# ~30-40% of events prematurely. 40 leaves a comfortable holiday margin.
+READY_MIN_CALENDAR_DAYS = 40
 
 MEASURED = "measured"
 UNAVAILABLE = "unavailable"
@@ -113,20 +116,26 @@ def iter_events(runs_path: Path = RUNS_LOG_PATH) -> list[AlertEvent]:
     return list(events.values())
 
 
-def load_measured_ids(outcomes_path: Path = OUTCOMES_PATH) -> set[str]:
-    """Return the event ids already present in the outcomes journal."""
+def load_outcome_states(outcomes_path: Path = OUTCOMES_PATH) -> dict[str, str]:
+    """Return the last recorded status per event id in the outcomes journal.
+
+    Only ``measured`` is terminal. An ``unavailable`` state is kept so we don't
+    re-append it every run, but it never freezes the event: a later run can still
+    upgrade it to ``measured`` once the data becomes available.
+    """
     if not outcomes_path.exists():
-        return set()
-    ids: set[str] = set()
+        return {}
+    states: dict[str, str] = {}
     for line in outcomes_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            ids.add(json.loads(line)["event_id"])
+            record = json.loads(line)
+            states[record["event_id"]] = record["status"]
         except (json.JSONDecodeError, KeyError):
             continue
-    return ids
+    return states
 
 
 def _append_jsonl(path: Path, record: dict) -> None:
@@ -208,20 +217,27 @@ def run(
     today = today or datetime.now(timezone.utc).date()
     close_fetcher = close_fetcher or default_close_fetcher
     events = iter_events(runs_path)
-    measured_ids = load_measured_ids(outcomes_path)
+    states = load_outcome_states(outcomes_path)
 
     closes_by_ticker = close_fetcher() if events else {}
 
     measured = unavailable = skipped = 0
     for event in events:
-        if event_id(event) in measured_ids:
+        eid = event_id(event)
+        # measured is terminal; unavailable is retried (never frozen) so a
+        # transient/degraded fetch can still be upgraded to measured later.
+        if states.get(eid) == MEASURED:
             continue
         record = measure_event(event, closes_by_ticker.get(event.ticker), today)
         if record is None:
             skipped += 1
             continue
+        if record["status"] == UNAVAILABLE and states.get(eid) == UNAVAILABLE:
+            # Already flagged unavailable; don't append a duplicate, keep retrying.
+            skipped += 1
+            continue
         _append_jsonl(outcomes_path, record)
-        measured_ids.add(record["event_id"])
+        states[eid] = record["status"]
         if record["status"] == MEASURED:
             measured += 1
         else:

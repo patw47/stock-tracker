@@ -164,6 +164,62 @@ def test_insufficient_history_not_ready_is_skipped(tmp_path):
     assert not outcomes.exists()
 
 
+# --- B1 : marge férié + unavailable jamais figé --------------------------
+
+
+def test_holiday_window_not_frozen_then_measured(tmp_path):
+    # Un férié dans la fenêtre décale le 20e close au-delà de J+28. À J+30 il
+    # manque encore une barre : l'event doit être SKIPPED (pas figé unavailable),
+    # puis mesuré une fois la 20e barre présente.
+    runs = _write_runs(tmp_path, [_run_record(AS_OF, [_detail("AAA", "survived", 3.0)])])
+    outcomes = tmp_path / "outcomes.jsonl"
+
+    only_19 = {"AAA": _closes(100.0, [100.0 + i for i in range(1, 20)])}  # 19 barres
+    s1 = run(runs_path=runs, outcomes_path=outcomes,
+             close_fetcher=lambda: only_19, today=AS_OF + timedelta(days=30))
+    assert s1 == outcome_tracker.Summary(measured=0, unavailable=0, skipped=1)
+    assert not outcomes.exists()  # jamais figé unavailable
+
+    full_20 = {"AAA": _closes(100.0, [100.0 + i for i in range(1, 21)])}  # 20 barres
+    s2 = run(runs_path=runs, outcomes_path=outcomes,
+             close_fetcher=lambda: full_20, today=AS_OF + timedelta(days=45))
+    assert s2.measured == 1
+    assert json.loads(outcomes.read_text().strip())["status"] == MEASURED
+
+
+def test_transient_unavailable_upgraded_to_measured(tmp_path):
+    # Fetch dégradé transitoire → unavailable, puis données présentes → measured.
+    runs = _write_runs(tmp_path, [_run_record(AS_OF, [_detail("AAA", "survived", 3.0)])])
+    outcomes = tmp_path / "outcomes.jsonl"
+    today = AS_OF + timedelta(days=45)
+
+    s1 = run(runs_path=runs, outcomes_path=outcomes, close_fetcher=lambda: {}, today=today)
+    assert s1.unavailable == 1
+
+    full = {"AAA": _closes(100.0, [100.0 + i for i in range(1, 21)])}
+    s2 = run(runs_path=runs, outcomes_path=outcomes, close_fetcher=lambda: full, today=today)
+    assert s2.measured == 1
+
+    statuses = [json.loads(line)["status"] for line in outcomes.read_text().splitlines()]
+    assert statuses == [UNAVAILABLE, MEASURED]  # upgrade, pas de gel
+
+    # 3e passe : measured est terminal → sauté avant tout comptage.
+    s3 = run(runs_path=runs, outcomes_path=outcomes, close_fetcher=lambda: full, today=today)
+    assert s3 == outcome_tracker.Summary(measured=0, unavailable=0, skipped=0)
+
+
+def test_repeated_unavailable_not_duplicated(tmp_path):
+    runs = _write_runs(tmp_path, [_run_record(AS_OF, [_detail("AAA", "survived", 3.0)])])
+    outcomes = tmp_path / "outcomes.jsonl"
+    today = AS_OF + timedelta(days=45)
+
+    run(runs_path=runs, outcomes_path=outcomes, close_fetcher=lambda: {}, today=today)
+    s2 = run(runs_path=runs, outcomes_path=outcomes, close_fetcher=lambda: {}, today=today)
+
+    assert s2 == outcome_tracker.Summary(measured=0, unavailable=0, skipped=1)
+    assert len(outcomes.read_text().strip().splitlines()) == 1  # pas de doublon unavailable
+
+
 # --- parsing du journal ---------------------------------------------------
 
 
