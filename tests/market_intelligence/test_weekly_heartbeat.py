@@ -95,6 +95,23 @@ def test_build_heartbeat_no_run_is_honest_not_silent() -> None:
     assert "Aucun run officiel cette semaine" in msg
 
 
+def test_build_heartbeat_escapes_html_in_journal_values() -> None:
+    # The message rides the shared parse_mode=HTML Telegram chain: any < > &
+    # coming from runs.jsonl must be escaped producer-side (Epic 3 S1 rule).
+    record = _rec(
+        timestamp="2026-06-29T21:30:00+00:00",
+        candidate_count=2,
+        outcomes=("gated_dedup:<weird&reason>",),
+        data_issues=("fetch_error:<html>&co",),
+    )
+    msg = weekly_heartbeat.build_heartbeat([record], TODAY)
+
+    assert "&lt;weird&amp;reason&gt;" in msg
+    assert "fetch_error:&lt;html&gt;&amp;co" in msg
+    assert "<weird" not in msg
+    assert "<html>" not in msg
+
+
 def test_module_has_no_llm_or_network() -> None:
     # No LLM client and no network client => proves "aucun appel LLM".
     # ("llm" as a word is skipped: the module docstring legitimately says "zéro LLM".)
