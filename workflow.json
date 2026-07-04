@@ -608,13 +608,13 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 22 1-7 * 5"
+              "expression": "0 22 * * 5"
             }
           ]
         }
       },
       "id": "node-monthly-report-schedule",
-      "name": "Monthly Report Schedule 1er Vendredi 22h UTC",
+      "name": "Monthly Report Schedule Vendredi 22h UTC",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -646,6 +646,37 @@
       "typeVersion": 2,
       "position": [
         40,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-monthly-nonempty",
+              "leftValue": "={{ ($json.warrenText || '').trim() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-monthly-report-guard",
+      "name": "Monthly Report Has Content?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        260,
         1360
       ]
     }
@@ -940,7 +971,7 @@
         ]
       ]
     },
-    "Monthly Report Schedule 1er Vendredi 22h UTC": {
+    "Monthly Report Schedule Vendredi 22h UTC": {
       "main": [
         [
           {
@@ -963,6 +994,17 @@
       ]
     },
     "Prepare Monthly Report for Telegram": {
+      "main": [
+        [
+          {
+            "node": "Monthly Report Has Content?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monthly Report Has Content?": {
       "main": [
         [
           {
