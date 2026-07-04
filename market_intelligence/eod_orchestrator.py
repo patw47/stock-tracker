@@ -17,7 +17,7 @@ import pandas as pd
 
 from market_intelligence.anomaly_signals import AnomalySignals, calculate_all
 from market_intelligence.beta_gate import calculate_all as calculate_beta_gates
-from market_intelligence.candidate_alerts import CandidateAlert
+from market_intelligence.candidate_alerts import AlertThresholdConfig, CandidateAlert
 from market_intelligence.candidate_alerts import evaluate_all as evaluate_candidates
 from market_intelligence.dedup_hysteresis import DeduplicatedAlert
 from market_intelligence.dedup_hysteresis import SuppressionDetail
@@ -332,6 +332,7 @@ def run_eod_anomaly_pipeline(
     dry_run: bool = False,
     skip_warren: bool = False,
     journal_path: Path | None = None,
+    alert_config: AlertThresholdConfig | None = None,
 ) -> EodRunResult:
     """Run S0-S7 once in the Sprint 8 deployment order.
 
@@ -363,12 +364,17 @@ def run_eod_anomaly_pipeline(
     signals = calculate_all(portfolio_frames)
     gates = calculate_beta_gates(signals, frames)
     as_of = _expected_as_of(signals)
-    decisions = evaluate_candidates(
-        signals,
-        gates,
-        expected_as_of=as_of or "",
-        expected_symbols=expected_symbols,
-    )
+    # Pass alert_config only when overridden (e.g. backtest calibration) so the
+    # default production path keeps its original call shape.
+    if alert_config is None:
+        decisions = evaluate_candidates(
+            signals, gates, expected_as_of=as_of or "", expected_symbols=expected_symbols,
+        )
+    else:
+        decisions = evaluate_candidates(
+            signals, gates, alert_config,
+            expected_as_of=as_of or "", expected_symbols=expected_symbols,
+        )
     short_interest = short_interest_fetcher(ticker_registry)
     # Two-phase commit: the official run stages its computed state to a pending
     # file (promoted by dedup_admin after Telegram send). Dry-run stages nothing.
