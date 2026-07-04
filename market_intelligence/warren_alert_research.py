@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final
+
+logger = logging.getLogger(__name__)
+
+_RUNTIME_DIR: Final[Path] = (
+    Path(__file__).parent.parent / "runtime" / "market_intelligence"
+)
+_ANALYSES_DIR: Final[Path] = _RUNTIME_DIR / "analyses"
+_OUTCOMES_PATH: Final[Path] = _RUNTIME_DIR / "outcomes.jsonl"
+
+MAX_PAST_ANALYSES: Final[int] = 2
+_SUMMARY_MAX_CHARS: Final[int] = 300
 
 from market_intelligence.edgar_form4 import (
     EdgarForm4Result,
@@ -62,6 +74,22 @@ class ResearchItem:
 
 
 @dataclass(frozen=True)
+class PastAnalysis:
+    """One prior Warren analysis of a ticker, paired with its measured outcome.
+
+    ``outcome`` holds the S1 returns ({"ret_1d","ret_5d","ret_20d"}) when measured,
+    {"status": "unavailable"} when the outcome could not be measured, or None when
+    no outcome row exists yet — the prompt must never confabulate in that case.
+    """
+
+    as_of: str
+    fire_reason: str
+    z_resid: float | None
+    summary: str
+    outcome: dict[str, object] | None
+
+
+@dataclass(frozen=True)
 class AlertResearchContext:
     """Collect all structured context passed to Warren for one deduped alert."""
 
@@ -73,6 +101,7 @@ class AlertResearchContext:
     market_status: MarketStructureStatus
     data_issues: tuple[str, ...]
     ticker_news_memory: str | None = None
+    past_analyses: tuple[PastAnalysis, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible representation."""
@@ -156,6 +185,113 @@ def _missing_edgar(ticker: str, issue: str) -> EdgarForm4Result:
     return EdgarForm4Result(ticker=ticker, cik=None, filings=(), data_issues=(issue,))
 
 
+def _analyses_path(ticker: str, *, analyses_dir: Path = _ANALYSES_DIR) -> Path:
+    return analyses_dir / f"{ticker}.jsonl"
+
+
+def persist_analysis(analysis: WarrenAlertAnalysis, *, analyses_dir: Path = _ANALYSES_DIR) -> None:
+    """Append one analysis record to the ticker's JSONL log (fail-soft).
+
+    Warren stays off the critical path: a write failure is logged and swallowed,
+    never propagated to the alert pipeline.
+    """
+    candidate = analysis.context.enriched_alert.alert.candidate
+    record = {
+        "as_of": candidate.as_of,
+        "fire_reason": analysis.context.enriched_alert.alert.fire_reason,
+        "z_resid": candidate.z_resid,
+        "signal_types": list(analysis.context.enriched_alert.alert.signal_types),
+        "analysis": analysis.analysis,
+    }
+    try:
+        analyses_dir.mkdir(parents=True, exist_ok=True)
+        path = _analyses_path(analysis.ticker, analyses_dir=analyses_dir)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    except OSError as exc:
+        logger.warning("Could not persist analysis for %s: %s", analysis.ticker, exc)
+
+
+def _load_outcomes_index(path: Path = _OUTCOMES_PATH) -> dict[str, dict]:
+    """Map event_id → last outcome record from outcomes.jsonl (last-wins)."""
+    index: dict[str, dict] = {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        # A truncated/corrupt (e.g. non-UTF-8) file must never crash the alert
+        # pipeline: Warren stays off the critical path.
+        return index
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+            index[record["event_id"]] = record
+        except (json.JSONDecodeError, KeyError):
+            continue
+    return index
+
+
+def _outcome_for(ticker: str, as_of: str | None, outcomes: dict[str, dict]) -> dict[str, object] | None:
+    """Return the returns / unavailable marker / None for a past analysis."""
+    if as_of is None:
+        return None
+    record = outcomes.get(f"{ticker}:{as_of}")
+    if record is None:
+        return None
+    if record.get("status") == "measured":
+        return {k: record.get(k) for k in ("ret_1d", "ret_5d", "ret_20d")}
+    return {"status": record.get("status", "unavailable")}
+
+
+def load_past_analyses(
+    ticker: str,
+    before_as_of: str | None,
+    *,
+    analyses_dir: Path = _ANALYSES_DIR,
+    outcomes_path: Path = _OUTCOMES_PATH,
+) -> tuple[PastAnalysis, ...]:
+    """Return up to MAX_PAST_ANALYSES prior analyses of ticker, with outcomes.
+
+    Fail-soft: any read/parse error yields an empty tuple so the alert prompt
+    simply omits the self-critique section (Warren off the critical path).
+    """
+    path = _analyses_path(ticker, analyses_dir=analyses_dir)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        # Corrupt/non-UTF-8 log (e.g. append truncated mid-UTF-8 by a kill/OOM):
+        # degrade to no self-critique section, never raise into the pipeline.
+        return ()
+
+    records: list[dict] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    outcomes = _load_outcomes_index(outcomes_path)
+    past: list[PastAnalysis] = []
+    for record in records:
+        as_of = record.get("as_of")
+        if before_as_of is not None and isinstance(as_of, str) and as_of >= before_as_of:
+            continue  # skip the current (or future) run's own analysis
+        summary = str(record.get("analysis", "")).strip()[:_SUMMARY_MAX_CHARS]
+        past.append(PastAnalysis(
+            as_of=str(as_of),
+            fire_reason=str(record.get("fire_reason", "")),
+            z_resid=record.get("z_resid"),
+            summary=summary,
+            outcome=_outcome_for(ticker, as_of if isinstance(as_of, str) else None, outcomes),
+        ))
+    return tuple(past[-MAX_PAST_ANALYSES:])
+
+
 def build_alert_research_context(
     enriched_alert: MacroEnrichedAlert,
     *,
@@ -166,12 +302,17 @@ def build_alert_research_context(
     market_status_fetcher: Callable[[TickerEntry], MarketStructureStatus] = (
         fetch_market_status
     ),
+    past_analyses_loader: Callable[[str, str | None], tuple[PastAnalysis, ...]] = (
+        load_past_analyses
+    ),
 ) -> AlertResearchContext:
     """Build structured Sprint 7 context for exactly one post-dedup alert."""
-    ticker = enriched_alert.alert.candidate.ticker
+    candidate = enriched_alert.alert.candidate
+    ticker = candidate.ticker
     ticker_registry = registry or load_registry()
     entry = _registry_lookup(ticker_registry).get(ticker)
     news_memory = _read_ticker_news_memory(ticker)
+    past_analyses = past_analyses_loader(ticker, candidate.as_of)
     if entry is None:
         edgar = _missing_edgar(ticker, "ticker_registry_missing")
         return AlertResearchContext(
@@ -187,6 +328,7 @@ def build_alert_research_context(
             ),
             data_issues=("ticker_registry_missing",),
             ticker_news_memory=news_memory,
+            past_analyses=past_analyses,
         )
 
     fetch_edgar = edgar_fetcher or fetch_company_form4_filings
@@ -210,6 +352,7 @@ def build_alert_research_context(
         market_status=market_status,
         data_issues=issues,
         ticker_news_memory=news_memory,
+        past_analyses=past_analyses,
     )
 
 
@@ -226,6 +369,8 @@ def build_alert_research_prompt(context: AlertResearchContext) -> str:
         "Reponse attendue: catalyseur probable, preuves, signaux techniques/flux, risques de donnees, conclusion.",
         "",
     ]
+    if context.past_analyses:
+        parts += _render_self_critique(context.past_analyses)
     if context.ticker_news_memory is not None:
         parts += [
             "=== MÉMOIRE NEWS LAYER A (dernières sessions) ===",
@@ -239,6 +384,35 @@ def build_alert_research_prompt(context: AlertResearchContext) -> str:
     return "\n".join(parts)
 
 
+def _format_outcome(outcome: dict[str, object] | None) -> str:
+    """Render a past analysis outcome without confabulating on missing data."""
+    if outcome is None:
+        return "outcome réel: non encore mesuré (ne rien inférer)."
+    if "status" in outcome:
+        return f"outcome réel: {outcome['status']} (ne rien inférer)."
+    def _pct(key: str) -> str:
+        value = outcome.get(key)
+        return f"{float(value):+.1%}" if isinstance(value, (int, float)) else "?"
+    return f"outcome réel: J+1 {_pct('ret_1d')} · J+5 {_pct('ret_5d')} · J+20 {_pct('ret_20d')}"
+
+
+def _render_self_critique(past_analyses: tuple[PastAnalysis, ...]) -> list[str]:
+    """Render the ANALYSES PASSÉES + OUTCOMES self-critique section."""
+    lines = [
+        "=== ANALYSES PASSÉES + OUTCOMES (auto-critique) ===",
+        "Confronte tes hypothèses passées à ce qui s'est réellement passé, ajuste ta "
+        "confiance. Ne confabule jamais quand l'outcome est unavailable ou non mesuré.",
+    ]
+    for past in past_analyses:
+        z = f"{past.z_resid:+.2f}" if isinstance(past.z_resid, (int, float)) else "?"
+        lines.append(
+            f"[{past.as_of}] fire={past.fire_reason} z={z} → hypothèse: {past.summary}"
+        )
+        lines.append(f"    {_format_outcome(past.outcome)}")
+    lines.append("")
+    return lines
+
+
 def analyze_alerts(
     enriched_alerts: Sequence[MacroEnrichedAlert],
     *,
@@ -250,8 +424,16 @@ def analyze_alerts(
         fetch_market_status
     ),
     warren_client: WarrenClient = _default_warren_client,
+    past_analyses_loader: Callable[[str, str | None], tuple[PastAnalysis, ...]] = (
+        load_past_analyses
+    ),
+    analysis_writer: Callable[[WarrenAlertAnalysis], None] = persist_analysis,
 ) -> tuple[WarrenAlertAnalysis, ...]:
-    """Call Warren once per post-dedup macro-enriched alert."""
+    """Call Warren once per post-dedup macro-enriched alert.
+
+    Each analysis is persisted (fail-soft) so future alerts on the same ticker can
+    feed Warren its prior hypotheses and their measured outcomes (self-critique).
+    """
     if not enriched_alerts:
         return ()
     analyses: list[WarrenAlertAnalysis] = []
@@ -263,16 +445,17 @@ def analyze_alerts(
             product_research_fetcher=product_research_fetcher,
             sector_research_fetcher=sector_research_fetcher,
             market_status_fetcher=market_status_fetcher,
+            past_analyses_loader=past_analyses_loader,
         )
         prompt = build_alert_research_prompt(context)
-        analyses.append(
-            WarrenAlertAnalysis(
-                ticker=enriched_alert.alert.candidate.ticker,
-                prompt=prompt,
-                analysis=warren_client(prompt),
-                context=context,
-            )
+        analysis = WarrenAlertAnalysis(
+            ticker=enriched_alert.alert.candidate.ticker,
+            prompt=prompt,
+            analysis=warren_client(prompt),
+            context=context,
         )
+        analysis_writer(analysis)
+        analyses.append(analysis)
     return tuple(analyses)
 
 
