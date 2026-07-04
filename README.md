@@ -126,13 +126,24 @@ Layer B EOD Schedule (21:30 UTC, Mon–Fri — DST-safe, always ≥ 30 min after
          │      Layer A news memory for the ticker · macro snapshot
          │      → explicitly allowed to answer "no identifiable catalyst"
          ▼
-  JSON result { survivor_count, should_send, digest, data_issues }
+  JSON result { survivor_count, should_send, digest, data_issues,
+                candidates_detail, dry_run, run_id, pending_state_path }
+         │
+         ├─ one line appended to runtime/market_intelligence/runs.jsonl
+         │  (every candidate with its exact non-alert reason — the run explains itself)
          │
          ▼ if survivors
-  One Telegram digest (reuses Aggregate for Telegram / Split for Telegram / Send Telegram nodes)
+  One Telegram digest (HTML-safe, reuses Aggregate / Split / Send Telegram nodes)
+         │
+         ▼ after confirmed delivery (or immediately when no survivor)
+  Commit Dedup State — the pending dedup state is only promoted once Telegram
+  delivery is confirmed (two-phase commit). A failed send leaves the state
+  untouched and the alert re-fires at the next run.
 ```
 
-No alert survives → nothing is sent.
+No alert survives → nothing is sent (but the run is journaled, the Friday
+heartbeat proves the pipeline is alive, and an external watchdog would have
+alerted if the run had not happened at all).
 
 ---
 
@@ -227,6 +238,46 @@ sector mapping in `data/sector_factors.json`, hysteresis in
 
 ---
 
+## 🛡️ Reliability & self-measurement (Epics 1–5, July 2026)
+
+After post-mortem PM-0001 (19 days of silence: the n8n workflow version was
+never published and `executeCommand` was banned by default in n8n 2.20), five
+epics turned the demo into a system:
+
+1. **Transactional dedup state** — any non-official run is dry-run by default
+   (`--dry-run` / `ANOMALY_DEDUP_READONLY=1`, zero side effects); the official
+   run writes a candidate state (`dedup_state.pending.json` + `run_id`) that
+   n8n only promotes after confirmed Telegram delivery. Failed send → the alert
+   re-fires. Admin tool: `python3 -m market_intelligence.dedup_admin
+   show|reset|commit`.
+2. **Observability** — append-only run journal (`runs.jsonl`, one line per run
+   with the exact reason each candidate did not alert), an EOD **watchdog
+   outside n8n** (systemd timer, 22:15 UTC — if n8n dies, the watchdog
+   survives, and alerts through the raw Telegram API), and a Friday heartbeat
+   so weekly silence is bounded by a positive signal. Zero LLM in the whole
+   chain.
+3. **Safe delivery** — LLM prose is untrusted input: everything sent to
+   Telegram is HTML-escaped producer-side (`parse_mode=HTML`), the 4,000-char
+   splitter never cuts a tag in half, the Warren bridge is a
+   `ThreadingHTTPServer` with a memory-write lock, and `Send Telegram` retries
+   ×3 with the final failure kept visible (no `continueOnFail`).
+4. **Unified ticker referential** — `python3 -m
+   market_intelligence.registry_check` is blocking in CI and at deploy time: a
+   ticker added via Telegram can no longer be silently invisible to detection.
+   New tickers are onboarded with safe defaults (`speculative` classification,
+   `single_factor_symbols`, symbol validated before any write); the sector-ETF
+   choice remains an explicit human decision in PR.
+5. **Track record** — J+1/J+5/J+20 outcomes are measured for sent alerts **and
+   for gated candidates** (`outcome_tracker`, systemd timer 22:30 UTC), a
+   monthly Telegram report aggregates them (with an honest "sample too small"
+   guard), a no-look-ahead backtest (`python3 -m market_intelligence.backtest
+   --start … --end …`) replays the deterministic pipeline over years of
+   history to calibrate thresholds, and Warren's alert prompt includes its own
+   past analyses for the ticker paired with the real outcomes (self-critique
+   loop, no confabulation when an outcome is unavailable).
+
+---
+
 ## Skills — on-demand Telegram commands
 
 | Skill | Trigger | What |
@@ -253,9 +304,13 @@ sector mapping in `data/sector_factors.json`, hysteresis in
 - **Signal-first briefing** — dominant market regime on the first line of the macro brief
 - **Tickers as data** — `portfolio.json` / `watchlist.json` are the source of truth, editable via Telegram (`modifyportfolio` / `modifywatchlist` skills)
 - **Symbol integrity** — registry + quarantine (`market_intelligence/data/`) so analysis never runs on a wrong ticker
-- **Auto-split Telegram** — messages split at 4,000 characters at paragraph boundaries
-- **systemd managed** — n8n, OpenClaw gateway, Warren HTTP bridge
-- **CI/CD** — push to `main` → tests → auto-deploy on the VPS via self-hosted runner
+- **Auto-split Telegram** — messages split at 4,000 characters at paragraph boundaries, HTML-safe
+- **Transactional dedup state** — dry-run by default, two-phase commit after confirmed delivery
+- **Run journal + external watchdog + weekly heartbeat** — silence is informative, not ambiguous
+- **Referential consistency enforced** — `registry_check` blocking in CI and at deploy
+- **Self-measured signal** — J+1/J+5/J+20 outcomes, monthly report, no-look-ahead backtest, Warren self-critique
+- **systemd managed** — n8n, OpenClaw gateway, Warren HTTP bridge + watchdog/outcome timers
+- **CI/CD** — push to `main` → 507 tests → auto-deploy on the VPS via self-hosted runner (workflow version published, referential validated)
 
 ---
 
@@ -285,18 +340,28 @@ stock-tracker/
 ├── watchlist.json             # 8 watchlist tickers (source of truth)
 ├── requirements.txt           # Python deps (pydantic, requests, anthropic, numpy, pandas, yfinance, pyarrow)
 ├── agents/warren/             # Prompt builder, macro providers (FRED, web search, market closes), ticker management
-├── market_intelligence/       # Layer B anomaly detection (S0–S8)
+├── market_intelligence/       # Layer B anomaly detection (S0–S7) + reliability & measurement tooling
+│   ├── eod_orchestrator.py    # Pipeline chief: dry-run flags, run journal, HTML-safe digest
+│   ├── dedup_hysteresis.py    # Hysteresis latch + suppression reasons + pending state (two-phase)
+│   ├── dedup_admin.py         # State admin CLI: show / reset / commit
+│   ├── registry_check.py      # Referential consistency validator (blocking in CI + deploy)
+│   ├── ticker_onboard.py      # Safe-default onboarding of a new ticker
+│   ├── outcome_tracker.py     # J+1/J+5/J+20 outcomes for alerts and gated candidates
+│   ├── monthly_report.py      # Monthly track-record Telegram report
+│   ├── backtest.py            # No-look-ahead backtest & threshold calibration harness
+│   ├── weekly_heartbeat.py    # Friday proof-of-life message (zero LLM)
 │   ├── sector_rotation.py     # Sector ETF rotation + IWM/SPY ratio (zero LLM)
 │   ├── fear_greed.py          # CNN Fear & Greed index (zero LLM)
 │   └── data/                  # registry, quarantine, thresholds, sector factors
 ├── skills/                    # OpenClaw skills sources
 │   ├── macrobrief/            # Macro Brief skill spec (SKILL.md)
 │   ├── tickerbrief/           # On-demand ticker brief skill spec (SKILL.md)
-│   ├── modifyportfolio/       # Portfolio management via Telegram
-│   └── modifywatchlist/       # Watchlist management via Telegram
-├── tests/                     # pytest suite (agents, market_intelligence, workflow wiring)
-├── docs/                      # project-structure, deployment, ticker schema
-├── deploy/                    # CI/CD: remote.sh + import_workflow.py
+│   ├── modifyportfolio/       # Portfolio management via Telegram (with Layer B onboarding)
+│   └── modifywatchlist/       # Watchlist management via Telegram (with Layer B onboarding)
+├── tests/                     # pytest suite — 507 tests (agents, market_intelligence, deploy, workflow wiring)
+├── docs/                      # project-structure, deployment, backtest guide, ticker schema
+├── deploy/                    # CI/CD: remote.sh, import_workflow.py (version publish),
+│                              # watchdog_eod.py + systemd units/timers (watchdog, outcome tracker)
 └── .github/workflows/         # CI + auto-deploy + Notion sync
 
 /home/warren/.openclaw/workspace-warren/      (on the VPS)
@@ -717,8 +782,9 @@ Warren stores raw news per ticker in `/home/warren/.openclaw/workspace-warren/me
 ## Service management
 
 ```bash
-# Status
+# Status (services + reliability timers)
 sudo systemctl status stock-tracker warren-server openclaw-warren
+systemctl list-timers eod-watchdog.timer outcome-tracker.timer
 
 # Restart all
 sudo systemctl restart openclaw-warren warren-server stock-tracker
@@ -727,6 +793,15 @@ sudo systemctl restart openclaw-warren warren-server stock-tracker
 sudo journalctl -u warren-server -f       # Python bridge logs
 sudo journalctl -u stock-tracker -f       # n8n logs
 sudo journalctl -u openclaw-warren -f     # OpenClaw logs
+sudo journalctl -u eod-watchdog.service -n 20   # last watchdog verdict
+sudo journalctl -u outcome-tracker.service -n 20
+
+# "Why did I receive nothing tonight?" — the run explains itself
+tail -1 runtime/market_intelligence/runs.jsonl | python3 -m json.tool
+
+# Dedup state admin (never edit the JSON by hand)
+python3 -m market_intelligence.dedup_admin show
+python3 -m market_intelligence.dedup_admin reset --ticker SYMBOL
 ```
 
 ---
@@ -769,3 +844,8 @@ and the Obsidian vault (`Memory/stock-tracker/epics/`). Key choices:
 - **Hysteresis dedup** — one alert per event, not per day; re-arms when the ticker calms down
 - **Layer B cron in fixed UTC (21:30)** — Paris-time cron ran before the US close for ~3 weeks each March (EU/US DST mismatch)
 - **systemd over PM2** — PM2 not available on this VPS; systemd provides equivalent reliability
+- **Dry-run by default, commit after delivery** — a manual run must never mutate production dedup state; better a duplicate alert than a lost one (PM-0001 / NUAI incident)
+- **Watchdog outside n8n** — its purpose is to detect n8n being dead, so it cannot live inside n8n
+- **LLM output is untrusted input** — HTML-escaped producer-side before any Telegram parse
+- **Workflow import must publish a version** — n8n executes the published version, not the draft; the deploy tooling asserts it
+- **Measure gated candidates too** — the cost of a missed alert is measured the same way as the noise of a sent one
