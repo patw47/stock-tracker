@@ -217,7 +217,9 @@ def _load_outcomes_index(path: Path = _OUTCOMES_PATH) -> dict[str, dict]:
     index: dict[str, dict] = {}
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # A truncated/corrupt (e.g. non-UTF-8) file must never crash the alert
+        # pipeline: Warren stays off the critical path.
         return index
     for line in text.splitlines():
         line = line.strip()
@@ -258,7 +260,9 @@ def load_past_analyses(
     path = _analyses_path(ticker, analyses_dir=analyses_dir)
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # Corrupt/non-UTF-8 log (e.g. append truncated mid-UTF-8 by a kill/OOM):
+        # degrade to no self-critique section, never raise into the pipeline.
         return ()
 
     records: list[dict] = []

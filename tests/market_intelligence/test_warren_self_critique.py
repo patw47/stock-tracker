@@ -169,6 +169,30 @@ def test_load_fail_soft_when_missing(tmp_path):
                               analyses_dir=tmp_path / "nope", outcomes_path=tmp_path / "no.jsonl") == ()
 
 
+def test_non_utf8_analyses_file_fail_soft(tmp_path):
+    # Log tronqué mi-séquence UTF-8 (kill/OOM) → () sans lever, section absente.
+    adir, opath = tmp_path / "analyses", tmp_path / "outcomes.jsonl"
+    adir.mkdir(parents=True)
+    (adir / f"{TICKER}.jsonl").write_bytes(b'{"as_of": "2026-06-01", "analysis": "\xff\xfe bad"}\n')
+
+    assert load_past_analyses(TICKER, "2026-06-15", analyses_dir=adir, outcomes_path=opath) == ()
+
+    prompt = build_alert_research_prompt(_context("2026-06-15", analyses_dir=adir, outcomes_path=opath))
+    assert "ANALYSES PASSÉES" not in prompt
+
+
+def test_non_utf8_outcomes_file_fail_soft(tmp_path):
+    # outcomes.jsonl corrompu ne doit pas faire crasher la lecture des analyses.
+    adir, opath = tmp_path / "analyses", tmp_path / "outcomes.jsonl"
+    _write_log(adir, [{"as_of": "2026-06-01", "fire_reason": "initial", "z_resid": 2.9,
+                       "signal_types": ["residual_z"], "analysis": "hyp"}])
+    opath.write_bytes(b'\xff\xfe not utf8')
+
+    past = load_past_analyses(TICKER, "2026-06-15", analyses_dir=adir, outcomes_path=opath)
+    assert len(past) == 1
+    assert past[0].outcome is None  # outcomes illisibles → aucun outcome, pas de crash
+
+
 def test_at_most_two_most_recent(tmp_path):
     adir, opath = tmp_path / "analyses", tmp_path / "outcomes.jsonl"
     _write_log(adir, [
