@@ -7,11 +7,13 @@ silence des jours sans anomalie devient une information positive.
 
 Template Python pur, **zéro LLM, zéro réseau** : le module imprime le message sur
 stdout ; l'envoi Telegram est fait par n8n (``executeCommand`` → chaîne
-Aggregate/Split/Send).
+Aggregate/Split/Send). Cette chaîne envoie en ``parse_mode=HTML`` : toute valeur
+issue du journal (raisons dédup, data_issues) est échappée côté producteur.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import sys
 from collections import Counter
@@ -94,11 +96,11 @@ def build_heartbeat(records: Iterable[dict], today: date) -> str:
     if reasons:
         lines.append("Suppressions dédup :")
         for reason, count in reasons.most_common():
-            lines.append(f"  • {reason} : {count}")
+            lines.append(f"  • {html.escape(reason)} : {count}")
     if issues:
         lines.append("Data issues fréquents :")
         for issue, count in issues.most_common(3):
-            lines.append(f"  • {issue} : {count}")
+            lines.append(f"  • {html.escape(issue)} : {count}")
     return "\n".join(lines)
 
 
