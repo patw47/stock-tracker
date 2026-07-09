@@ -148,7 +148,9 @@ def extract_inner(stdout):
 
     if outer:
         result_obj = outer.get("result", {})
-        fat = result_obj.get("finalAssistantVisibleText")
+        # OpenClaw >= 2026.5 nests the final text under result.meta.
+        meta_obj = result_obj.get("meta", {}) if isinstance(result_obj, dict) else {}
+        fat = result_obj.get("finalAssistantVisibleText") or meta_obj.get("finalAssistantVisibleText")
         if fat and fat != "NO_REPLY":
             return fat
         payloads = result_obj.get("payloads", [])
@@ -156,7 +158,7 @@ def extract_inner(stdout):
             all_text = "\n".join(p.get("text", "") for p in payloads if p.get("text"))
             if all_text:
                 return all_text
-        raw = result_obj.get("finalAssistantRawText")
+        raw = result_obj.get("finalAssistantRawText") or meta_obj.get("finalAssistantRawText")
         if raw and raw != "NO_REPLY":
             return raw
         for key in ("response", "content", "message", "text", "output"):

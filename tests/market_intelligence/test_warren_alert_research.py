@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from unittest.mock import Mock
 
@@ -303,3 +305,27 @@ def test_prompt_excludes_memory_section_when_absent(tmp_path: pytest.TempDir, mo
     prompt = build_alert_research_prompt(context)
 
     assert "=== MÉMOIRE NEWS LAYER A" not in prompt
+
+
+def test_default_warren_client_extracts_openclaw_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The S7 client must never return the raw OpenClaw --json envelope (incident 2026-07-07)."""
+    import warren_server
+    from market_intelligence.warren_alert_research import _default_warren_client
+
+    # Format OpenClaw >= 2026.5 : texte final sous result.meta, payloads
+    # potentiellement tronqué — le texte complet de meta doit gagner.
+    envelope = json.dumps({
+        "result": {
+            "payloads": [{"text": "# ANOMALY-ALERT-RESEARCH S7 — XYL", "mediaUrl": None}],
+            "meta": {
+                "finalAssistantVisibleText": "# ANOMALY-ALERT-RESEARCH S7 — XYL\nanalyse propre",
+                "systemPromptReport": {"tools": [{"name": "web_search", "schemaChars": 1209}]},
+            },
+        },
+    })
+    monkeypatch.setattr(warren_server, "call_warren", lambda message, tag: envelope)
+
+    analysis = _default_warren_client("prompt")
+
+    assert analysis == "# ANOMALY-ALERT-RESEARCH S7 — XYL\nanalyse propre"
+    assert "schemaChars" not in analysis
