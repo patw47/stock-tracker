@@ -283,10 +283,18 @@ epics turned the demo into a system:
 | Skill | Trigger | What |
 |---|---|---|
 | **tickerbrief** | `brief TICKER`, `point sur TICKER`, `actu TICKER` | On-demand brief: today's news + ticker memory + EOD anomaly state + sector. Read-only. |
-| **modifyportfolio** | natural language via Warren | Add/remove tickers from portfolio.json interactively |
-| **modifywatchlist** | natural language via Warren | Add/remove tickers from watchlist.json interactively |
+| **modifyportfolio** | `/modifyportfolio` | Add/remove tickers from portfolio.json interactively |
+| **modifywatchlist** | `/modifywatchlist` | Add/remove tickers from watchlist.json interactively |
 
 **tickerbrief** assembles: memory/tickers/SYMBOL.md, fresh web search news, dedup_state.json anomaly state, sector_factors.json. Read-only — never writes files. Returns a signal-first Telegram reply (anomaly status first, then news, then memory). For tickers not in portfolio/watchlist, returns raw web search only.
+
+**modifyportfolio / modifywatchlist** — send `/modifyportfolio` (or `/modifywatchlist`) to Warren in Telegram:
+
+1. Warren replies with **[➕ Add a ticker] [➖ Remove a ticker]** inline buttons.
+2. **Add** → type the symbol(s), e.g. `NVDA, MSFT` → file updated with `added` date + ✅ confirmation.
+3. **Remove** → current tickers shown as toggle buttons → select → **✅ Validate**.
+
+Never hand-edit `portfolio.json` / `watchlist.json` — the flow goes through `agents/warren/manage_tickers.py` (atomic write, dedupe, date stamp).
 
 ---
 
