@@ -172,9 +172,12 @@ def _default_sector_research(entry: TickerEntry) -> tuple[ResearchItem, ...]:
 
 
 def _default_warren_client(prompt: str) -> str:
-    from warren_server import call_warren
+    from warren_server import call_warren, extract_inner
 
-    return call_warren(prompt, "alert")
+    # call_warren returns the raw OpenClaw --json envelope (tool schemas,
+    # finalPromptText, ...); only the extracted assistant text may reach the
+    # digest / persisted analyses.
+    return extract_inner(call_warren(prompt, "alert"))
 
 
 def _registry_lookup(registry: Registry) -> dict[str, TickerEntry]:
