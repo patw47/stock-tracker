@@ -32,10 +32,21 @@ def _messages(issues: list[Issue]) -> str:
 
 
 def test_ticker_absent_du_registry_est_bloquant():
-    issues = evaluate({"watchlist.json": ["ZZZ"]}, REGISTRY, CLASSIFIED | {"ZZZ"}, FACTORS | {"ZZZ"})
+    issues = evaluate({"portfolio.json": ["ZZZ"]}, REGISTRY, CLASSIFIED | {"ZZZ"}, FACTORS | {"ZZZ"})
     assert _severities(issues, "ZZZ") == [BLOCKING]
     assert "registry.json" in _messages(issues)
-    assert "watchlist.json" in _messages(issues)
+    assert "portfolio.json" in _messages(issues)
+
+
+def test_watchlist_hors_registre_est_info_tier_tension():
+    # Watchlist = tier tension (Layer C) : hors registre → info, jamais bloquant.
+    issues = evaluate(
+        {"watchlist.json": ["ZZZ"]}, REGISTRY, CLASSIFIED, FACTORS,
+        light_labels=frozenset({"watchlist.json"}),
+    )
+    assert _severities(issues, "ZZZ") == [INFO]
+    assert "tension" in _messages(issues)
+    assert not [i for i in issues if i.severity == BLOCKING]
 
 
 def test_classification_manquante_est_bloquant():
@@ -65,7 +76,7 @@ def test_entree_registry_orpheline_est_info_non_bloquant():
 
 
 def test_ticker_cumule_les_trois_manques():
-    issues = evaluate({"watchlist.json": ["NEW"]}, REGISTRY, CLASSIFIED, FACTORS)
+    issues = evaluate({"portfolio.json": ["NEW"]}, REGISTRY, CLASSIFIED, FACTORS)
     assert _severities(issues, "NEW") == [BLOCKING, BLOCKING, BLOCKING]
 
 
@@ -84,8 +95,8 @@ def test_run_check_repo_examples_passe():
 def test_run_check_exit_non_zero_si_divergence(tmp_path, capsys):
     portfolio = tmp_path / "portfolio.json"
     watchlist = tmp_path / "watchlist.json"
-    _write(portfolio, ["BBAI"])          # cohérent (dans les référentiels réels)
-    _write(watchlist, ["FAKE_TICKER"])   # diverge : inconnu partout
+    _write(portfolio, ["FAKE_TICKER"])   # diverge : inconnu partout → bloquant
+    _write(watchlist, [])
 
     rc = registry_check.run_check(portfolio, watchlist)
     out = capsys.readouterr().out
@@ -94,6 +105,21 @@ def test_run_check_exit_non_zero_si_divergence(tmp_path, capsys):
     assert "[BLOCKING]" in out
     assert "FAKE_TICKER" in out
     assert "registry.json" in out
+
+
+def test_run_check_watchlist_hors_registre_ne_bloque_pas(tmp_path, capsys):
+    # Le cas VPS réel : watchlist massive hors registre → tier tension, exit 0.
+    portfolio = tmp_path / "portfolio.json"
+    watchlist = tmp_path / "watchlist.json"
+    _write(portfolio, ["BBAI"])
+    _write(watchlist, ["NVDA", "TSLA", "FAKE_TICKER"])
+
+    rc = registry_check.run_check(portfolio, watchlist)
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "[BLOCKING]" not in out
+    assert "tension" in out
 
 
 def test_run_check_exit_zero_si_runtime_coherent(tmp_path):

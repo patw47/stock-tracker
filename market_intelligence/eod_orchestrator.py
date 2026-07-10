@@ -24,7 +24,7 @@ from market_intelligence.dedup_hysteresis import SuppressionDetail
 from market_intelligence.dedup_hysteresis import dedup_readonly_env
 from market_intelligence.dedup_hysteresis import deduplicate_alerts
 from market_intelligence.dedup_hysteresis import default_pending_path
-from market_intelligence.fetch_eod import fetch_all
+from market_intelligence.fetch_eod import fetch_all, fetch_symbols
 from market_intelligence.macro_snapshot import (
     MacroSnapshot,
     MacroSnapshotCache,
@@ -342,6 +342,8 @@ def run_eod_anomaly_pipeline(
     journal_path: Path | None = None,
     alert_config: AlertThresholdConfig | None = None,
     tension_journal_path: Path | None = None,
+    watchlist_symbols: Sequence[str] | None = None,
+    watchlist_fetcher: Callable[[list[str], int], dict[str, pd.DataFrame]] = fetch_symbols,
 ) -> EodRunResult:
     """Run S0-S7 once in the Sprint 8 deployment order.
 
@@ -422,10 +424,16 @@ def run_eod_anomaly_pipeline(
 
     # Layer C — tension: journal every ticker-day (feeds outcome measurement),
     # append an alert block on new episodes. Deterministic, no LLM, and off the
-    # critical path: a failure never blocks the anomaly pipeline.
+    # critical path: a failure never blocks the anomaly pipeline. Watchlist
+    # tickers (tension tier) are scanned too: OHLCV only, no registry entry,
+    # no classification, no beta gate.
     if tension_journal_path is not None:
         try:
-            tension = calculate_tension_signals(portfolio_frames)
+            tension_frames = dict(portfolio_frames)
+            extra = [s for s in (watchlist_symbols or ()) if s not in tension_frames]
+            if extra:
+                tension_frames.update(watchlist_fetcher(extra, history_days))
+            tension = calculate_tension_signals(tension_frames)
             append_tension_journal(
                 tension, tension_journal_path, dry_run=effective_dry_run
             )
@@ -497,6 +505,21 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _load_watchlist_symbols() -> tuple[str, ...]:
+    """Watchlist symbols for the tension tier (VPS watchlist.json, else example).
+
+    Off the critical path: any read/parse failure returns () and the EOD run
+    proceeds on the portfolio alone.
+    """
+    from market_intelligence.registry_check import _resolve_runtime_path, load_runtime_symbols
+
+    try:
+        return tuple(load_runtime_symbols(_resolve_runtime_path("watchlist")))
+    except Exception as exc:
+        logger.error("watchlist load failed (tension tier skipped): %s", exc)
+        return ()
+
+
 def main() -> None:
     """Run the CLI and print a JSON payload for n8n."""
     args = _parse_args()
@@ -510,6 +533,7 @@ def main() -> None:
         skip_warren=args.skip_warren,
         journal_path=_RUNS_LOG_PATH,
         tension_journal_path=_TENSION_LOG_PATH,
+        watchlist_symbols=_load_watchlist_symbols(),
     )
     print(json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True))
 

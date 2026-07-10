@@ -64,26 +64,41 @@ def evaluate(
     registry_symbols: set[str],
     classified_symbols: set[str],
     factor_covered_symbols: set[str],
+    light_labels: frozenset[str] = frozenset(),
 ) -> list[Issue]:
     """Return every coherence issue between runtime lists and the referentials.
 
     ``runtime`` maps a file label (shown in messages) to its ticker symbols.
     Blocking issues: a runtime ticker missing from the registry, from the alert
-    classifications, or from sector-factor coverage. Info issues: a registry entry
+    classifications, or from sector-factor coverage. Lists named in
+    ``light_labels`` (the watchlist) are the tension tier — Layer C only, OHLCV
+    fetched directly, no registry/classification/factor requirement — so their
+    gaps are informational, never blocking. Info issues: a registry entry
     absent from every runtime list (the VPS may run shorter local lists).
     """
     issues: list[Issue] = []
     all_runtime: set[str] = set()
 
     for label, symbols in runtime.items():
+        light = label in light_labels
         for sym in symbols:
             all_runtime.add(sym)
             if sym not in registry_symbols:
+                if light:
+                    issues.append(Issue(
+                        INFO, sym,
+                        f"{sym}: dans {label}, hors registre — couvert par le tier "
+                        "tension (Layer C) uniquement, pas de détection d'anomalie "
+                        "Layer B.",
+                    ))
+                    continue  # Layer B referentials don't apply to the tension tier
                 issues.append(Issue(
                     BLOCKING, sym,
                     f"{sym}: présent dans {label} mais absent de registry.json "
                     "(portfolio_tickers) — ajouter l'entrée au registre.",
                 ))
+            if light:
+                continue
             if sym not in classified_symbols:
                 issues.append(Issue(
                     BLOCKING, sym,
@@ -125,6 +140,7 @@ def run_check(portfolio_path: Path | None = None, watchlist_path: Path | None = 
         load_registry_symbols(),
         load_classified_symbols(),
         load_factor_covered_symbols(),
+        light_labels=frozenset({watchlist_path.name}),
     )
 
     blocking = [i for i in issues if i.severity == BLOCKING]

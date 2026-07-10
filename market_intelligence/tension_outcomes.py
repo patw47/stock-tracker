@@ -11,7 +11,6 @@ from market_intelligence.outcome_tracker import (
     UNAVAILABLE,
     AlertEvent,
     _append_jsonl,
-    default_close_fetcher,
     load_outcome_states,
     measure_event,
 )
@@ -65,9 +64,22 @@ def run(
     20d window > EXPECTED_MOVE_MULT x expected_move_20d journaled at entry.
     """
     today = today or datetime.now(timezone.utc).date()
-    close_fetcher = close_fetcher or default_close_fetcher
     episodes = iter_episodes(tension_path)
     states = load_outcome_states(outcomes_path)
+    if close_fetcher is None:
+        # The journal covers watchlist tickers absent from the registry, so the
+        # closes must be fetched for the episode tickers themselves (batch),
+        # not via fetch_all (registry-only).
+        tickers = sorted({str(e["symbol"]) for e in episodes})
+
+        def close_fetcher() -> dict:
+            from market_intelligence.fetch_eod import fetch_symbols
+
+            return {
+                symbol: frame["Close"]
+                for symbol, frame in fetch_symbols(tickers).items()
+                if not frame.empty and "Close" in frame.columns
+            }
     closes_by_ticker = close_fetcher() if episodes else {}
 
     measured = unavailable = skipped = 0
