@@ -1,40 +1,914 @@
 {
   "portfolio_tickers": [
-    {"symbol": "BBAI", "api_symbol": "BBAI", "expected_name": "BigBear.ai"},
-    {"symbol": "HIMS", "api_symbol": "HIMS", "expected_name": "Hims & Hers Health"},
-    {"symbol": "MMED", "api_symbol": "MMED", "expected_name": "MiniMed"},
-    {"symbol": "PRCH", "api_symbol": "PRCH", "expected_name": "Porch Group"},
-    {"symbol": "RGTI", "api_symbol": "RGTI", "expected_name": "Rigetti Computing"},
-    {"symbol": "VUZI", "api_symbol": "VUZI", "expected_name": "Vuzix"},
-    {"symbol": "XYL", "api_symbol": "XYL", "expected_name": "Xylem"},
-    {"symbol": "NUAI", "api_symbol": "NUAI", "expected_name": "New Era Energy"},
-    {"symbol": "SMR", "api_symbol": "SMR", "expected_name": "NuScale Power"},
-    {"symbol": "ALTD", "api_symbol": "ALTD", "expected_name": "Altitude"},
-    {"symbol": "OKLO", "api_symbol": "OKLO", "expected_name": "Oklo"},
-    {"symbol": "BLNK", "api_symbol": "BLNK", "expected_name": "Blink Charging"},
-    {"symbol": "GRO", "api_symbol": "GRO", "expected_name": "Brazil Potash"},
-    {"symbol": "STIM", "api_symbol": "STIM", "expected_name": "Neuronetics"},
-    {"symbol": "PLX", "api_symbol": "PLX", "expected_name": "Protalix"},
-    {"symbol": "HYLN", "api_symbol": "HYLN", "expected_name": "Hyliion"}
+    {
+      "symbol": "BBAI",
+      "api_symbol": "BBAI",
+      "expected_name": "BigBear.ai"
+    },
+    {
+      "symbol": "HIMS",
+      "api_symbol": "HIMS",
+      "expected_name": "Hims & Hers Health"
+    },
+    {
+      "symbol": "MMED",
+      "api_symbol": "MMED",
+      "expected_name": "MiniMed"
+    },
+    {
+      "symbol": "PRCH",
+      "api_symbol": "PRCH",
+      "expected_name": "Porch Group"
+    },
+    {
+      "symbol": "RGTI",
+      "api_symbol": "RGTI",
+      "expected_name": "Rigetti Computing"
+    },
+    {
+      "symbol": "VUZI",
+      "api_symbol": "VUZI",
+      "expected_name": "Vuzix"
+    },
+    {
+      "symbol": "XYL",
+      "api_symbol": "XYL",
+      "expected_name": "Xylem"
+    },
+    {
+      "symbol": "NUAI",
+      "api_symbol": "NUAI",
+      "expected_name": "New Era Energy"
+    },
+    {
+      "symbol": "SMR",
+      "api_symbol": "SMR",
+      "expected_name": "NuScale Power"
+    },
+    {
+      "symbol": "ALTD",
+      "api_symbol": "ALTD",
+      "expected_name": "Altitude"
+    },
+    {
+      "symbol": "OKLO",
+      "api_symbol": "OKLO",
+      "expected_name": "Oklo"
+    },
+    {
+      "symbol": "BLNK",
+      "api_symbol": "BLNK",
+      "expected_name": "Blink Charging"
+    },
+    {
+      "symbol": "GRO",
+      "api_symbol": "GRO",
+      "expected_name": "Brazil Potash"
+    },
+    {
+      "symbol": "STIM",
+      "api_symbol": "STIM",
+      "expected_name": "Neuronetics"
+    },
+    {
+      "symbol": "PLX",
+      "api_symbol": "PLX",
+      "expected_name": "Protalix"
+    },
+    {
+      "symbol": "HYLN",
+      "api_symbol": "HYLN",
+      "expected_name": "Hyliion"
+    },
+    {
+      "symbol": "ABSI",
+      "api_symbol": "ABSI",
+      "expected_name": "Absci Corporation"
+    },
+    {
+      "symbol": "ABX",
+      "api_symbol": "ABX",
+      "expected_name": "Abacus Global Management, Inc."
+    },
+    {
+      "symbol": "ACHV",
+      "api_symbol": "ACHV",
+      "expected_name": "Achieve Life Sciences, Inc."
+    },
+    {
+      "symbol": "ACRS",
+      "api_symbol": "ACRS",
+      "expected_name": "Aclaris Therapeutics, Inc."
+    },
+    {
+      "symbol": "ACVA",
+      "api_symbol": "ACVA",
+      "expected_name": "ACV Auctions Inc."
+    },
+    {
+      "symbol": "AIIO",
+      "api_symbol": "AIIO",
+      "expected_name": "Robo.ai Inc."
+    },
+    {
+      "symbol": "AKTS",
+      "api_symbol": "AKTS",
+      "expected_name": "Aktis Oncology, Inc."
+    },
+    {
+      "symbol": "ALDX",
+      "api_symbol": "ALDX",
+      "expected_name": "Aldeyra Therapeutics, Inc."
+    },
+    {
+      "symbol": "ALIT",
+      "api_symbol": "ALIT",
+      "expected_name": "Alight, Inc."
+    },
+    {
+      "symbol": "ALOT",
+      "api_symbol": "ALOT",
+      "expected_name": "AstroNova, Inc."
+    },
+    {
+      "symbol": "AMPG",
+      "api_symbol": "AMPG",
+      "expected_name": "AmpliTech Group, Inc."
+    },
+    {
+      "symbol": "ANAB",
+      "api_symbol": "ANAB",
+      "expected_name": "AnaptysBio, Inc."
+    },
+    {
+      "symbol": "ANGI",
+      "api_symbol": "ANGI",
+      "expected_name": "Angi Inc."
+    },
+    {
+      "symbol": "AORT",
+      "api_symbol": "AORT",
+      "expected_name": "Artivion, Inc."
+    },
+    {
+      "symbol": "APPS",
+      "api_symbol": "APPS",
+      "expected_name": "Digital Turbine, Inc."
+    },
+    {
+      "symbol": "ARQQ",
+      "api_symbol": "ARQQ",
+      "expected_name": "Arqit Quantum Inc."
+    },
+    {
+      "symbol": "ARTV",
+      "api_symbol": "ARTV",
+      "expected_name": "Artiva Biotherapeutics, Inc."
+    },
+    {
+      "symbol": "ATAI",
+      "api_symbol": "ATAI",
+      "expected_name": "AtaiBeckley Inc."
+    },
+    {
+      "symbol": "AVXL",
+      "api_symbol": "AVXL",
+      "expected_name": "Anavex Life Sciences Corp."
+    },
+    {
+      "symbol": "BCAX",
+      "api_symbol": "BCAX",
+      "expected_name": "Bicara Therapeutics Inc."
+    },
+    {
+      "symbol": "BCYC",
+      "api_symbol": "BCYC",
+      "expected_name": "Bicycle Therapeutics plc"
+    },
+    {
+      "symbol": "BDSX",
+      "api_symbol": "BDSX",
+      "expected_name": "Biodesix, Inc."
+    },
+    {
+      "symbol": "BFLY",
+      "api_symbol": "BFLY",
+      "expected_name": "Butterfly Network, Inc."
+    },
+    {
+      "symbol": "BJRI",
+      "api_symbol": "BJRI",
+      "expected_name": "BJ's Restaurants, Inc."
+    },
+    {
+      "symbol": "BLKB",
+      "api_symbol": "BLKB",
+      "expected_name": "Blackbaud, Inc."
+    },
+    {
+      "symbol": "BRBR",
+      "api_symbol": "BRBR",
+      "expected_name": "BellRing Brands, Inc."
+    },
+    {
+      "symbol": "BRCB",
+      "api_symbol": "BRCB",
+      "expected_name": "Black Rock Coffee Bar, Inc."
+    },
+    {
+      "symbol": "BTQ",
+      "api_symbol": "BTQ",
+      "expected_name": "BTQ Technologies Corp."
+    },
+    {
+      "symbol": "BUR",
+      "api_symbol": "BUR",
+      "expected_name": "Burford Capital Limited"
+    },
+    {
+      "symbol": "BVS",
+      "api_symbol": "BVS",
+      "expected_name": "Bioventus Inc."
+    },
+    {
+      "symbol": "BZH",
+      "api_symbol": "BZH",
+      "expected_name": "Beazer Homes USA, Inc."
+    },
+    {
+      "symbol": "CAAS",
+      "api_symbol": "CAAS",
+      "expected_name": "China Automotive Systems, Inc."
+    },
+    {
+      "symbol": "CADL",
+      "api_symbol": "CADL",
+      "expected_name": "Candel Therapeutics, Inc."
+    },
+    {
+      "symbol": "CBRL",
+      "api_symbol": "CBRL",
+      "expected_name": "Cracker Barrel Old Country Store, Inc."
+    },
+    {
+      "symbol": "CD",
+      "api_symbol": "CD",
+      "expected_name": "Chaince Digital Holdings Inc."
+    },
+    {
+      "symbol": "CDNA",
+      "api_symbol": "CDNA",
+      "expected_name": "CareDx, Inc."
+    },
+    {
+      "symbol": "CLPT",
+      "api_symbol": "CLPT",
+      "expected_name": "ClearPoint Neuro, Inc."
+    },
+    {
+      "symbol": "CLYM",
+      "api_symbol": "CLYM",
+      "expected_name": "Climb Bio Inc"
+    },
+    {
+      "symbol": "CMPX",
+      "api_symbol": "CMPX",
+      "expected_name": "Compass Therapeutics, Inc."
+    },
+    {
+      "symbol": "CRBP",
+      "api_symbol": "CRBP",
+      "expected_name": "Corbus Pharmaceuticals Holdings, Inc."
+    },
+    {
+      "symbol": "CTEV",
+      "api_symbol": "CTEV",
+      "expected_name": "Claritev Corporation"
+    },
+    {
+      "symbol": "CUE",
+      "api_symbol": "CUE",
+      "expected_name": "Cue Biopharma, Inc."
+    },
+    {
+      "symbol": "CVRX",
+      "api_symbol": "CVRX",
+      "expected_name": "CVRx, Inc."
+    },
+    {
+      "symbol": "DFDV",
+      "api_symbol": "DFDV",
+      "expected_name": "DeFi Development Corp."
+    },
+    {
+      "symbol": "DRTS",
+      "api_symbol": "DRTS",
+      "expected_name": "Alpha Tau Medical Ltd."
+    },
+    {
+      "symbol": "DTIL",
+      "api_symbol": "DTIL",
+      "expected_name": "Precision BioSciences, Inc."
+    },
+    {
+      "symbol": "EMPD",
+      "api_symbol": "EMPD",
+      "expected_name": "Empery Digital Inc."
+    },
+    {
+      "symbol": "ETON",
+      "api_symbol": "ETON",
+      "expected_name": "Eton Pharmaceuticals, Inc."
+    },
+    {
+      "symbol": "EVC",
+      "api_symbol": "EVC",
+      "expected_name": "Entravision Communications Corporation"
+    },
+    {
+      "symbol": "EVER",
+      "api_symbol": "EVER",
+      "expected_name": "EverQuote, Inc."
+    },
+    {
+      "symbol": "EVH",
+      "api_symbol": "EVH",
+      "expected_name": "Evolent Health, Inc."
+    },
+    {
+      "symbol": "FATE",
+      "api_symbol": "FATE",
+      "expected_name": "Fate Therapeutics, Inc."
+    },
+    {
+      "symbol": "FCEL",
+      "api_symbol": "FCEL",
+      "expected_name": "FuelCell Energy, Inc."
+    },
+    {
+      "symbol": "FENC",
+      "api_symbol": "FENC",
+      "expected_name": "Fennec Pharmaceuticals Inc."
+    },
+    {
+      "symbol": "FLXS",
+      "api_symbol": "FLXS",
+      "expected_name": "Flexsteel Industries, Inc."
+    },
+    {
+      "symbol": "FOA",
+      "api_symbol": "FOA",
+      "expected_name": "Finance of America Companies Inc."
+    },
+    {
+      "symbol": "FRD",
+      "api_symbol": "FRD",
+      "expected_name": "Friedman Industries, Incorporated"
+    },
+    {
+      "symbol": "FRMM",
+      "api_symbol": "FRMM",
+      "expected_name": "Forum Markets, Incorporated"
+    },
+    {
+      "symbol": "FULC",
+      "api_symbol": "FULC",
+      "expected_name": "Fulcrum Therapeutics, Inc."
+    },
+    {
+      "symbol": "GALT",
+      "api_symbol": "GALT",
+      "expected_name": "Galectin Therapeutics Inc."
+    },
+    {
+      "symbol": "GHRS",
+      "api_symbol": "GHRS",
+      "expected_name": "GH Research PLC"
+    },
+    {
+      "symbol": "GOGO",
+      "api_symbol": "GOGO",
+      "expected_name": "Gogo Inc."
+    },
+    {
+      "symbol": "GRPN",
+      "api_symbol": "GRPN",
+      "expected_name": "Groupon, Inc."
+    },
+    {
+      "symbol": "GTM",
+      "api_symbol": "GTM",
+      "expected_name": "ZoomInfo Technologies Inc."
+    },
+    {
+      "symbol": "HQ",
+      "api_symbol": "HQ",
+      "expected_name": "Horizon Quantum Holdings Ltd."
+    },
+    {
+      "symbol": "HUYA",
+      "api_symbol": "HUYA",
+      "expected_name": "HUYA Inc."
+    },
+    {
+      "symbol": "IDN",
+      "api_symbol": "IDN",
+      "expected_name": "Intellicheck, Inc."
+    },
+    {
+      "symbol": "IFRX",
+      "api_symbol": "IFRX",
+      "expected_name": "InflaRx N.V."
+    },
+    {
+      "symbol": "INNV",
+      "api_symbol": "INNV",
+      "expected_name": "InnovAge Holding Corp."
+    },
+    {
+      "symbol": "INSP",
+      "api_symbol": "INSP",
+      "expected_name": "Inspire Medical Systems, Inc."
+    },
+    {
+      "symbol": "IRWD",
+      "api_symbol": "IRWD",
+      "expected_name": "Ironwood Pharmaceuticals, Inc."
+    },
+    {
+      "symbol": "JBIO",
+      "api_symbol": "JBIO",
+      "expected_name": "Jade Biosciences, Inc."
+    },
+    {
+      "symbol": "KLC",
+      "api_symbol": "KLC",
+      "expected_name": "KinderCare Learning Companies, Inc."
+    },
+    {
+      "symbol": "KMTS",
+      "api_symbol": "KMTS",
+      "expected_name": "Kestra Medical Technologies, Ltd."
+    },
+    {
+      "symbol": "KURA",
+      "api_symbol": "KURA",
+      "expected_name": "Kura Oncology, Inc."
+    },
+    {
+      "symbol": "LENZ",
+      "api_symbol": "LENZ",
+      "expected_name": "LENZ Therapeutics, Inc."
+    },
+    {
+      "symbol": "LESL",
+      "api_symbol": "LESL",
+      "expected_name": "Leslie's, Inc."
+    },
+    {
+      "symbol": "LMRI",
+      "api_symbol": "LMRI",
+      "expected_name": "Lumexa Imaging Holdings, Inc."
+    },
+    {
+      "symbol": "LPRO",
+      "api_symbol": "LPRO",
+      "expected_name": "Open Lending Corporation"
+    },
+    {
+      "symbol": "LYEL",
+      "api_symbol": "LYEL",
+      "expected_name": "Lyell Immunopharma, Inc."
+    },
+    {
+      "symbol": "MAX",
+      "api_symbol": "MAX",
+      "expected_name": "MediaAlpha, Inc."
+    },
+    {
+      "symbol": "MEI",
+      "api_symbol": "MEI",
+      "expected_name": "Methode Electronics, Inc."
+    },
+    {
+      "symbol": "MGTX",
+      "api_symbol": "MGTX",
+      "expected_name": "MeiraGTx Holdings plc"
+    },
+    {
+      "symbol": "MLKN",
+      "api_symbol": "MLKN",
+      "expected_name": "MillerKnoll, Inc."
+    },
+    {
+      "symbol": "MNKD",
+      "api_symbol": "MNKD",
+      "expected_name": "MannKind Corporation"
+    },
+    {
+      "symbol": "MNPR",
+      "api_symbol": "MNPR",
+      "expected_name": "Monopar Therapeutics Inc."
+    },
+    {
+      "symbol": "MPLT",
+      "api_symbol": "MPLT",
+      "expected_name": "MapLight Therapeutics, Inc."
+    },
+    {
+      "symbol": "MYE",
+      "api_symbol": "MYE",
+      "expected_name": "Myers Industries, Inc."
+    },
+    {
+      "symbol": "NEO",
+      "api_symbol": "NEO",
+      "expected_name": "NeoGenomics, Inc."
+    },
+    {
+      "symbol": "NGNE",
+      "api_symbol": "NGNE",
+      "expected_name": "Neurogene Inc."
+    },
+    {
+      "symbol": "NKTX",
+      "api_symbol": "NKTX",
+      "expected_name": "Nkarta, Inc."
+    },
+    {
+      "symbol": "NNBR",
+      "api_symbol": "NNBR",
+      "expected_name": "NN, Inc."
+    },
+    {
+      "symbol": "NSP",
+      "api_symbol": "NSP",
+      "expected_name": "Insperity, Inc."
+    },
+    {
+      "symbol": "NUTX",
+      "api_symbol": "NUTX",
+      "expected_name": "Nutex Health Inc."
+    },
+    {
+      "symbol": "NVCT",
+      "api_symbol": "NVCT",
+      "expected_name": "Nuvectis Pharma, Inc."
+    },
+    {
+      "symbol": "OCC",
+      "api_symbol": "OCC",
+      "expected_name": "Optical Cable Corporation"
+    },
+    {
+      "symbol": "OCS",
+      "api_symbol": "OCS",
+      "expected_name": "Oculis Holding AG"
+    },
+    {
+      "symbol": "OLMA",
+      "api_symbol": "OLMA",
+      "expected_name": "Olema Pharmaceuticals, Inc."
+    },
+    {
+      "symbol": "OMDA",
+      "api_symbol": "OMDA",
+      "expected_name": "Omada Health, Inc."
+    },
+    {
+      "symbol": "OPRX",
+      "api_symbol": "OPRX",
+      "expected_name": "OptimizeRx Corporation"
+    },
+    {
+      "symbol": "ORGO",
+      "api_symbol": "ORGO",
+      "expected_name": "Organogenesis Holdings Inc."
+    },
+    {
+      "symbol": "PACK",
+      "api_symbol": "PACK",
+      "expected_name": "Ranpak Holdings Corp."
+    },
+    {
+      "symbol": "PAHC",
+      "api_symbol": "PAHC",
+      "expected_name": "Phibro Animal Health Corporation"
+    },
+    {
+      "symbol": "PAR",
+      "api_symbol": "PAR",
+      "expected_name": "PAR Technology Corporation"
+    },
+    {
+      "symbol": "PAYS",
+      "api_symbol": "PAYS",
+      "expected_name": "Paysign, Inc."
+    },
+    {
+      "symbol": "PGEN",
+      "api_symbol": "PGEN",
+      "expected_name": "Precigen, Inc."
+    },
+    {
+      "symbol": "PHR",
+      "api_symbol": "PHR",
+      "expected_name": "Phreesia, Inc."
+    },
+    {
+      "symbol": "PRG",
+      "api_symbol": "PRG",
+      "expected_name": "PROG Holdings, Inc."
+    },
+    {
+      "symbol": "PRME",
+      "api_symbol": "PRME",
+      "expected_name": "Prime Medicine, Inc."
+    },
+    {
+      "symbol": "PSNL",
+      "api_symbol": "PSNL",
+      "expected_name": "Personalis, Inc."
+    },
+    {
+      "symbol": "PYXS",
+      "api_symbol": "PYXS",
+      "expected_name": "Pyxis Oncology, Inc."
+    },
+    {
+      "symbol": "RDVT",
+      "api_symbol": "RDVT",
+      "expected_name": "Red Violet, Inc."
+    },
+    {
+      "symbol": "RFL",
+      "api_symbol": "RFL",
+      "expected_name": "Rafael Holdings, Inc."
+    },
+    {
+      "symbol": "RGNX",
+      "api_symbol": "RGNX",
+      "expected_name": "REGENXBIO Inc."
+    },
+    {
+      "symbol": "RIGL",
+      "api_symbol": "RIGL",
+      "expected_name": "Rigel Pharmaceuticals, Inc."
+    },
+    {
+      "symbol": "RMAX",
+      "api_symbol": "RMAX",
+      "expected_name": "RE/MAX Holdings, Inc."
+    },
+    {
+      "symbol": "RNAC",
+      "api_symbol": "RNAC",
+      "expected_name": "Cartesian Therapeutics, Inc."
+    },
+    {
+      "symbol": "ROOT",
+      "api_symbol": "ROOT",
+      "expected_name": "Root, Inc."
+    },
+    {
+      "symbol": "RPD",
+      "api_symbol": "RPD",
+      "expected_name": "Rapid7, Inc."
+    },
+    {
+      "symbol": "RRGB",
+      "api_symbol": "RRGB",
+      "expected_name": "Red Robin Gourmet Burgers, Inc."
+    },
+    {
+      "symbol": "RXT",
+      "api_symbol": "RXT",
+      "expected_name": "Rackspace Technology, Inc."
+    },
+    {
+      "symbol": "SBET",
+      "api_symbol": "SBET",
+      "expected_name": "Sharplink, Inc."
+    },
+    {
+      "symbol": "SFIX",
+      "api_symbol": "SFIX",
+      "expected_name": "Stitch Fix, Inc."
+    },
+    {
+      "symbol": "SGHT",
+      "api_symbol": "SGHT",
+      "expected_name": "Sight Sciences, Inc."
+    },
+    {
+      "symbol": "SI",
+      "api_symbol": "SI",
+      "expected_name": "Shoulder Innovations, Inc."
+    },
+    {
+      "symbol": "SLDB",
+      "api_symbol": "SLDB",
+      "expected_name": "Solid Biosciences Inc."
+    },
+    {
+      "symbol": "SLN",
+      "api_symbol": "SLN",
+      "expected_name": "Silence Therapeutics plc"
+    },
+    {
+      "symbol": "SMWB",
+      "api_symbol": "SMWB",
+      "expected_name": "Similarweb Ltd."
+    },
+    {
+      "symbol": "TBI",
+      "api_symbol": "TBI",
+      "expected_name": "TrueBlue, Inc."
+    },
+    {
+      "symbol": "TBLA",
+      "api_symbol": "TBLA",
+      "expected_name": "Taboola.com Ltd."
+    },
+    {
+      "symbol": "TDOC",
+      "api_symbol": "TDOC",
+      "expected_name": "Teladoc Health, Inc."
+    },
+    {
+      "symbol": "TDUP",
+      "api_symbol": "TDUP",
+      "expected_name": "ThredUp Inc."
+    },
+    {
+      "symbol": "TMCI",
+      "api_symbol": "TMCI",
+      "expected_name": "Treace Medical Concepts, Inc."
+    },
+    {
+      "symbol": "TRDA",
+      "api_symbol": "TRDA",
+      "expected_name": "Entrada Therapeutics, Inc."
+    },
+    {
+      "symbol": "TTGT",
+      "api_symbol": "TTGT",
+      "expected_name": "TechTarget, Inc."
+    },
+    {
+      "symbol": "TWFG",
+      "api_symbol": "TWFG",
+      "expected_name": "TWFG, Inc."
+    },
+    {
+      "symbol": "ULCC",
+      "api_symbol": "ULCC",
+      "expected_name": "Frontier Group Holdings, Inc."
+    },
+    {
+      "symbol": "UPB",
+      "api_symbol": "UPB",
+      "expected_name": "Upstream Bio, Inc."
+    },
+    {
+      "symbol": "UPWK",
+      "api_symbol": "UPWK",
+      "expected_name": "Upwork Inc."
+    },
+    {
+      "symbol": "URGN",
+      "api_symbol": "URGN",
+      "expected_name": "UroGen Pharma Ltd."
+    },
+    {
+      "symbol": "VITL",
+      "api_symbol": "VITL",
+      "expected_name": "Vital Farms, Inc."
+    },
+    {
+      "symbol": "VIVO",
+      "api_symbol": "VIVO",
+      "expected_name": "VivoPower PLC"
+    },
+    {
+      "symbol": "VNCE",
+      "api_symbol": "VNCE",
+      "expected_name": "Vince Holding Corp."
+    },
+    {
+      "symbol": "WNC",
+      "api_symbol": "WNC",
+      "expected_name": "Wabash National Corporation"
+    },
+    {
+      "symbol": "WVE",
+      "api_symbol": "WVE",
+      "expected_name": "Wave Life Sciences Ltd."
+    },
+    {
+      "symbol": "WYFI",
+      "api_symbol": "WYFI",
+      "expected_name": "WhiteFiber, Inc."
+    },
+    {
+      "symbol": "XERS",
+      "api_symbol": "XERS",
+      "expected_name": "Xeris Biopharma Holdings, Inc."
+    },
+    {
+      "symbol": "ZIP",
+      "api_symbol": "ZIP",
+      "expected_name": "ZipRecruiter, Inc."
+    },
+    {
+      "symbol": "ZNTL",
+      "api_symbol": "ZNTL",
+      "expected_name": "Zentalis Pharmaceuticals, Inc."
+    },
+    {
+      "symbol": "ZVRA",
+      "api_symbol": "ZVRA",
+      "expected_name": "Zevra Therapeutics, Inc."
+    }
   ],
   "macro_tickers": [
-    {"symbol": "IWM", "api_symbol": "IWM", "expected_name": "iShares Russell 2000"},
-    {"symbol": "^VIX", "api_symbol": "^VIX", "expected_name": "CBOE Volatility Index"},
-    {"symbol": "^TNX", "api_symbol": "^TNX", "expected_name": "CBOE Interest Rate 10"},
-    {"symbol": "DXY", "api_symbol": "DX-Y.NYB", "expected_name": "US Dollar"},
-    {"symbol": "OIL", "api_symbol": "CL=F", "expected_name": "Crude Oil"}
+    {
+      "symbol": "IWM",
+      "api_symbol": "IWM",
+      "expected_name": "iShares Russell 2000"
+    },
+    {
+      "symbol": "^VIX",
+      "api_symbol": "^VIX",
+      "expected_name": "CBOE Volatility Index"
+    },
+    {
+      "symbol": "^TNX",
+      "api_symbol": "^TNX",
+      "expected_name": "CBOE Interest Rate 10"
+    },
+    {
+      "symbol": "DXY",
+      "api_symbol": "DX-Y.NYB",
+      "expected_name": "US Dollar"
+    },
+    {
+      "symbol": "OIL",
+      "api_symbol": "CL=F",
+      "expected_name": "Crude Oil"
+    }
   ],
   "factor_tickers": [
-    {"symbol": "NUKZ", "api_symbol": "NUKZ", "expected_name": "Range Nuclear Renaissance ETF"},
-    {"symbol": "QTUM", "api_symbol": "QTUM", "expected_name": "Defiance Quantum ETF"},
-    {"symbol": "PHO", "api_symbol": "PHO", "expected_name": "Invesco Water Resources ETF"},
-    {"symbol": "FIW", "api_symbol": "FIW", "expected_name": "First Trust Water ETF"},
-    {"symbol": "MOO", "api_symbol": "MOO", "expected_name": "VanEck Agribusiness ETF"},
-    {"symbol": "IHI", "api_symbol": "IHI", "expected_name": "iShares U.S. Medical Devices ETF"},
-    {"symbol": "XLV", "api_symbol": "XLV", "expected_name": "Health Care Select Sector SPDR"},
-    {"symbol": "XBI", "api_symbol": "XBI", "expected_name": "SPDR S&P Biotech ETF"},
-    {"symbol": "BOTZ", "api_symbol": "BOTZ", "expected_name": "Global X Robotics & AI ETF"},
-    {"symbol": "KARS", "api_symbol": "KARS", "expected_name": "KraneShares Electric Vehicles ETF"}
+    {
+      "symbol": "NUKZ",
+      "api_symbol": "NUKZ",
+      "expected_name": "Range Nuclear Renaissance ETF"
+    },
+    {
+      "symbol": "QTUM",
+      "api_symbol": "QTUM",
+      "expected_name": "Defiance Quantum ETF"
+    },
+    {
+      "symbol": "PHO",
+      "api_symbol": "PHO",
+      "expected_name": "Invesco Water Resources ETF"
+    },
+    {
+      "symbol": "FIW",
+      "api_symbol": "FIW",
+      "expected_name": "First Trust Water ETF"
+    },
+    {
+      "symbol": "MOO",
+      "api_symbol": "MOO",
+      "expected_name": "VanEck Agribusiness ETF"
+    },
+    {
+      "symbol": "IHI",
+      "api_symbol": "IHI",
+      "expected_name": "iShares U.S. Medical Devices ETF"
+    },
+    {
+      "symbol": "XLV",
+      "api_symbol": "XLV",
+      "expected_name": "Health Care Select Sector SPDR"
+    },
+    {
+      "symbol": "XBI",
+      "api_symbol": "XBI",
+      "expected_name": "SPDR S&P Biotech ETF"
+    },
+    {
+      "symbol": "BOTZ",
+      "api_symbol": "BOTZ",
+      "expected_name": "Global X Robotics & AI ETF"
+    },
+    {
+      "symbol": "KARS",
+      "api_symbol": "KARS",
+      "expected_name": "KraneShares Electric Vehicles ETF"
+    }
   ],
   "alias_map": {
     "DXY": "DX-Y.NYB",

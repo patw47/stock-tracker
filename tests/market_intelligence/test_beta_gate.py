@@ -262,27 +262,13 @@ def test_batch_consumes_s1_signals_excludes_iwm_and_serializes_finite_values() -
 
 
 def test_default_factor_config_covers_portfolio_and_notes_endogeneity() -> None:
+    from market_intelligence.registry_schema import load_registry
+
     config = load_factor_config()
     covered = set(config.sector_factors) | set(config.single_factor_symbols)
+    portfolio = {entry.symbol for entry in load_registry().portfolio_tickers}
 
-    assert covered == {
-        "BBAI",
-        "HIMS",
-        "MMED",
-        "PRCH",
-        "RGTI",
-        "VUZI",
-        "XYL",
-        "NUAI",
-        "SMR",
-        "ALTD",
-        "OKLO",
-        "BLNK",
-        "GRO",
-        "STIM",
-        "PLX",
-        "HYLN",
-    }
+    assert portfolio <= covered, sorted(portfolio - covered)
     assert config.market_factor == "IWM"
     assert config.correlation_threshold == pytest.approx(0.35)
     assert "no endogeneity correction" in config.endogeneity_note.lower()
