@@ -1,0 +1,13 @@
+[Unit]
+Description=Measure tension (Layer C) episode outcomes on weekdays after the EOD run
+
+[Timer]
+# ~1h after the 21:30 UTC EOD cron, right after outcome-tracker. Off the alert
+# critical path: a failure here never blocks the evening pipeline. UTC pinned
+# explicitly so the schedule does not drift with the VPS system timezone.
+OnCalendar=Mon..Fri *-*-* 22:35:00 UTC
+Persistent=true
+Unit=tension-outcomes.service
+
+[Install]
+WantedBy=timers.target
