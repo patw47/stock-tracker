@@ -1,0 +1,10 @@
+[Unit]
+Description=Stock Tracker tension outcomes (Layer C: measure episodes due at J+20, off critical path)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=queenp
+WorkingDirectory=/opt/apps/stock-tracker
+ExecStart=/usr/bin/python3 -m market_intelligence.tension_outcomes

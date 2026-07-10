@@ -100,6 +100,16 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now outcome-tracker.timer >/dev/null 2>&1
 ot_timer=$(systemctl is-active outcome-tracker.timer 2>/dev/null || echo inactive)
 
+# 5d. Tension outcomes (Layer C) : timer systemd, juste après outcome-tracker,
+#     jours ouvrés. Hors chemin critique — n'influence pas overall, état
+#     rapporté via STATUS_TENSION_TIMER.
+log "install/enable tension outcomes timer"
+sudo cp "$REPO/deploy/tension-outcomes.service" /etc/systemd/system/tension-outcomes.service
+sudo cp "$REPO/deploy/tension-outcomes.timer"   /etc/systemd/system/tension-outcomes.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now tension-outcomes.timer >/dev/null 2>&1
+tn_timer=$(systemctl is-active tension-outcomes.timer 2>/dev/null || echo inactive)
+
 overall="ok"
 if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
    || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ] \
@@ -107,7 +117,7 @@ if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
   overall="fail"
 fi
 
-log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) watchdog_timer=$wd_timer outcome_timer=$ot_timer import_rc=$import_rc registry_rc=$registry_rc"
+log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) watchdog_timer=$wd_timer outcome_timer=$ot_timer tension_timer=$tn_timer import_rc=$import_rc registry_rc=$registry_rc"
 
 # Lignes machine-lisibles consommées par deploy.yml.
 echo "STATUS_STOCK_TRACKER=$st_active"
@@ -115,4 +125,5 @@ echo "STATUS_N8N_HEALTH=$n8n_health"
 echo "STATUS_WARREN=$warren_status"
 echo "STATUS_WATCHDOG_TIMER=$wd_timer"
 echo "STATUS_OUTCOME_TIMER=$ot_timer"
+echo "STATUS_TENSION_TIMER=$tn_timer"
 echo "STATUS_OVERALL=$overall"

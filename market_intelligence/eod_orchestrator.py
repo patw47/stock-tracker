@@ -32,6 +32,11 @@ from market_intelligence.macro_snapshot import (
 )
 from market_intelligence.registry_schema import Registry, load_quarantine, load_registry
 from market_intelligence.short_interest import ShortInterestResult, fetch_all_short_interest
+from market_intelligence.tension_signals import (
+    append_tension_journal,
+    calculate_all as calculate_tension_signals,
+    format_tension_digest,
+)
 from market_intelligence.warren_alert_research import (
     WarrenAlertAnalysis,
     analyze_alerts,
@@ -42,6 +47,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_HISTORY_DAYS: Final[int] = 280
 _RUNS_LOG_PATH: Final[Path] = (
     Path(__file__).parent.parent / "runtime" / "market_intelligence" / "runs.jsonl"
+)
+_TENSION_LOG_PATH: Final[Path] = (
+    Path(__file__).parent.parent / "runtime" / "market_intelligence" / "tension.jsonl"
 )
 
 FrameFetcher = Callable[[int], dict[str, pd.DataFrame]]
@@ -333,6 +341,7 @@ def run_eod_anomaly_pipeline(
     skip_warren: bool = False,
     journal_path: Path | None = None,
     alert_config: AlertThresholdConfig | None = None,
+    tension_journal_path: Path | None = None,
 ) -> EodRunResult:
     """Run S0-S7 once in the Sprint 8 deployment order.
 
@@ -411,6 +420,21 @@ def run_eod_anomaly_pipeline(
         analyses = analyzer(enriched)
     digest = format_digest(analyses, as_of=as_of)
 
+    # Layer C — tension: journal every ticker-day (feeds outcome measurement),
+    # append an alert block on new episodes. Deterministic, no LLM, and off the
+    # critical path: a failure never blocks the anomaly pipeline.
+    if tension_journal_path is not None:
+        try:
+            tension = calculate_tension_signals(portfolio_frames)
+            append_tension_journal(
+                tension, tension_journal_path, dry_run=effective_dry_run
+            )
+            tension_block = format_tension_digest(tension, as_of=as_of)
+            if tension_block:
+                digest = f"{digest}\n\n{tension_block}" if digest else tension_block
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.error("tension layer failed (non-blocking): %s", exc)
+
     issues = list(_missing_frame_issues(frames, ticker_registry))
     for decision in decisions.values():
         issues.extend(decision.data_issues)
@@ -485,6 +509,7 @@ def main() -> None:
         dry_run=args.dry_run,
         skip_warren=args.skip_warren,
         journal_path=_RUNS_LOG_PATH,
+        tension_journal_path=_TENSION_LOG_PATH,
     )
     print(json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True))
 
