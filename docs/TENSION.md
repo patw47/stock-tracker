@@ -1,12 +1,12 @@
-# Layer C — tension (pré-enregistrement de l'hypothèse)
+# Layer C — tension
 
-Statut : **alertes réelles** depuis 2026-07-10, sur décision utilisateur, AVANT
-l'issue de la validation live (promotion anticipée — signal non validé, cf.
-instabilité entre régimes ci-dessous). La mesure continue à l'identique :
-journal quotidien + `tension_outcomes` + critère figé ci-dessous, qui reste le
-juge a posteriori (maintien ou retrait des alertes). Ce document fige
-l'hypothèse, les seuils et le critère de décision AVANT l'arrivée des données
-live — ils ne changent pas en cours de validation.
+Statut : **alertes réelles** depuis 2026-07-10, sur décision utilisateur.
+La mesure tourne en parallèle (journal quotidien + `tension_outcomes`) pour
+vérifier si les données live confirment l'hypothèse. Le repère chiffré
+ci-dessous sert à lire ces données, rien de plus : maintien, retrait ou
+ajustement des alertes restent des décisions du propriétaire, à tout moment.
+Note technique : garder les seuils stables garde les chiffres live comparables
+au backtest phase 0 ; les changer remet le compteur de mesure à zéro.
 
 ## Hypothèse
 
@@ -31,13 +31,14 @@ hit rates directionnels 41-49 % ≈ pile ou face.
 
 Pas de direction prédite : la compression prédit l'expansion, pas le signe.
 
-## Critère de décision (figé le 2026-07-10, avant les données)
+## Repère de lecture (benchmark noté le 2026-07-10, avant les données)
 
-- **Maintien de l'alerting** (promu par anticipation le 2026-07-10) : lift live
-  ≥ **1.5** sur ≥ **50 épisodes mesurés**, lift = P(explosion | épisode) / base
-  rate même-ticker (recalculé via `scripts/tension_backtest.py --start <début du live>`).
-- **Retrait des alertes** : lift < 1.5 une fois 50 épisodes mesurés.
-- Cadence attendue : ~6 épisodes/mois (backtest) → décision vers ~8-9 mois.
+- Signal **confirmé** si : lift live ≥ **1.5** sur ≥ **50 épisodes mesurés**,
+  lift = P(explosion | épisode) / base rate même-ticker (recalculé via
+  `scripts/tension_backtest.py --start <début du live>`).
+- Signal **infirmé** si : lift < 1.5 une fois 50 épisodes mesurés.
+- Cadence attendue : ~6 épisodes/mois (backtest) → lecture possible vers ~8-9 mois.
+- Ce repère informe ; il ne décide de rien.
 
 ## Ce que le backtest (phase 0) a montré — et pas montré
 
