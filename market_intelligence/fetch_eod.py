@@ -103,6 +103,36 @@ def fetch_all(days: int = 60) -> dict[str, pd.DataFrame]:
     return results
 
 
+def fetch_symbols(symbols: list[str], days: int = 280) -> dict[str, pd.DataFrame]:
+    """Batch OHLCV for arbitrary symbols (watchlist tension tier — Layer C).
+
+    One batched yfinance call (threads). No registry, no quarantine, no Twelve
+    Data fallback: a wrong/delisted symbol yields an empty frame, which the
+    tension layer degrades gracefully (``empty_frame`` issue, never journaled).
+    """
+    if not symbols:
+        return {}
+    df = yf.download(
+        list(symbols),
+        period=f"{days}d",
+        interval="1d",
+        progress=False,
+        auto_adjust=True,
+        group_by="ticker",
+        threads=True,
+    )
+    results: dict[str, pd.DataFrame] = {}
+    for symbol in symbols:
+        if isinstance(df.columns, pd.MultiIndex):
+            sub = df[symbol] if symbol in df.columns.get_level_values(0) else pd.DataFrame()
+        else:
+            sub = df  # single-symbol download: flat columns
+        sub = sub.dropna(how="all")
+        available = [c for c in _OHLCV_COLS if c in sub.columns]
+        results[symbol] = sub[available] if not sub.empty else pd.DataFrame()
+    return results
+
+
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,

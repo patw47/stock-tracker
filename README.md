@@ -125,6 +125,8 @@ Layer B EOD Schedule (21:30 UTC, Mon–Fri — DST-safe, always ≥ 30 min after
          │      halt status (FINRA) · SSR status (Nasdaq) · squeeze flag
          │      Layer A news memory for the ticker · macro snapshot
          │      → explicitly allowed to answer "no identifiable catalyst"
+         │   S8 Layer C tension scan (registry + watchlist tickers, no LLM)
+         │      → tension.jsonl journal + ⚡ digest block on new episodes
          ▼
   JSON result { survivor_count, should_send, digest, data_issues,
                 candidates_detail, dry_run, run_id, pending_state_path }
@@ -147,7 +149,7 @@ alerted if the run had not happened at all).
 
 ---
 
-## 🔍 Anomaly detection to anticipate a potential move
+## 🔍 Anomaly detection — an attention detector, measured as such
 
 ### The problem we are solving
 
@@ -155,7 +157,12 @@ On speculative small caps, **price often moves before the news becomes public**
 (rumor, accumulation, squeeze). A pipeline that only reads news therefore arrives
 late. Layer B does not predict anything: it detects that **an unusual move has
 just happened**, then asks Warren to investigate. It is an attention detector,
-not a crystal ball.
+not a crystal ball — and that claim is now **measured**, not asserted: a
+no-look-ahead ablation over 2022-2026 ([docs/RESULTS.md](docs/RESULTS.md))
+shows directional hit rates of 41-49% (≈ coin flip) for every variant of the
+pipeline. Its measured value is **selectivity** (30 alerts/month vs 79 for a
+naive >5%-move rule, −62%), not direction. Detecting *before* the move is
+Layer C's job (below).
 
 ### Step 1 — "Is this move unusual for THIS ticker?" (the z-score)
 
@@ -229,12 +236,55 @@ catalyst — flow/technical/squeeze likely"*.
 ### What anomaly detection does not do
 
 - It does not predict direction (a volume spike says "look", not "it goes up").
+  Measured: J+5 hit rate 44% vs 49% for the naive baseline
+  ([docs/RESULTS.md](docs/RESULTS.md)).
+- It does not detect *before* the move: it scans close bars at 21:30 UTC, so
+  the move is hours old by design. That is Layer C's job.
 - It does not trade. A high false-positive rate is accepted: this is an
   attention tool, strictly better than a daily news scan, not a robot.
 
 Configuration: thresholds in `market_intelligence/data/alert_thresholds.json`,
 sector mapping in `data/sector_factors.json`, hysteresis in
 `data/dedup_thresholds.json`, squeeze in `data/short_interest_thresholds.json`.
+
+---
+
+## ⚡ Layer C — Tension (detect *before* the move)
+
+The theory: explosions on small caps are preceded by **silent accumulation**
+visible on close bars — volatility compression and volume without price. Layer C
+scores that tension every evening and alerts on the **first day** a ticker
+enters a tension state, typically days before any move (median lead in
+backtest: ~13 trading days).
+
+| Signal | Definition | Threshold |
+|---|---|---|
+| **SQUEEZE** | 20d Bollinger bandwidth percentile within the trailing year | ≤ 10% |
+| **QUIET** (silent accumulation) | 5d mean relative volume, with a flat 5d cumulative return | rvol5 ≥ 2 and \|cum5\| < 3% |
+| **TENSION** | SQUEEZE or QUIET | — |
+
+No direction is predicted (compression predicts expansion, not sign) and no
+LLM is involved: the ⚡ digest block is deterministic.
+
+**Coverage — portfolio and watchlist.** Layer C scans **every registry ticker**
+(166 as of July 2026: the full VPS portfolio + watchlist, onboarded in PR #53)
+**plus any watchlist ticker not yet in the registry** — the *tension tier*:
+OHLCV fetched directly in one batched call, no registry entry, classification
+or sector-ETF mapping required. A ticker added via `/modifywatchlist` is
+therefore scanned by Layer C the **same evening**, before its registry
+onboarding; `registry_check` reports it as info, not blocking. Full Layer B
+(beta gate + Warren) requires the registry entry.
+
+**Honesty section.** The phase-0 backtest (2022-2026, [docs/TENSION.md](docs/TENSION.md))
+found lift 1.5-1.66 for P(move > 2× the ATR-expected 20d move) after a tension
+episode — but the signal is **regime-unstable**: ~1.1 in 2022-2024, ~1.9 in
+2024-2026. Alerts are live since 2026-07-10 (owner's decision) while the live
+measurement runs in parallel: every ticker-day is journaled
+(`runtime/market_intelligence/tension.jsonl`), episode outcomes are measured at
+J+20 (`tension_outcomes`, systemd timer 22:35 UTC), and the reading benchmark —
+informative, not binding — is lift ≥ 1.5 over ≥ 50 measured episodes.
+`python3 -m market_intelligence.tension_outcomes --report` shows the running
+tally.
 
 ---
 
@@ -263,8 +313,11 @@ epics turned the demo into a system:
    ×3 with the final failure kept visible (no `continueOnFail`).
 4. **Unified ticker referential** — `python3 -m
    market_intelligence.registry_check` is blocking in CI and at deploy time: a
-   ticker added via Telegram can no longer be silently invisible to detection.
-   New tickers are onboarded with safe defaults (`speculative` classification,
+   **portfolio** ticker can no longer be silently invisible to detection.
+   A watchlist ticker not yet in the registry is still scanned by the tension
+   tier (Layer C) the same evening and is reported as info, not blocking —
+   never invisible, never a deploy failure. New registry
+   tickers are onboarded with safe defaults (`speculative` classification,
    `single_factor_symbols`, symbol validated before any write); the sector-ETF
    choice remains an explicit human decision in PR.
 5. **Track record** — J+1/J+5/J+20 outcomes are measured for sent alerts **and

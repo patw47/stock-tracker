@@ -37,7 +37,11 @@ Pas de direction prédite : la compression prédit l'expansion, pas le signe.
   lift = P(explosion | épisode) / base rate même-ticker (recalculé via
   `scripts/tension_backtest.py --start <début du live>`).
 - Signal **infirmé** si : lift < 1.5 une fois 50 épisodes mesurés.
-- Cadence attendue : ~6 épisodes/mois (backtest) → lecture possible vers ~8-9 mois.
+- Cadence attendue : ~6 épisodes/mois sur l'univers backtest (16 tickers) ;
+  avec le registre à 166 (PR #53), ~10× plus → les 50 épisodes mesurables
+  devraient être atteints en ~1-2 mois (mesure J+20 + 40 j calendaires de délai).
+  Attention : le backtest phase 0 reste mesuré sur 16 tickers — les lifts live
+  sur 166 ne sont comparables qu'au sens du même calcul, pas du même univers.
 - Ce repère informe ; il ne décide de rien.
 
 ## Ce que le backtest (phase 0) a montré — et pas montré
@@ -64,6 +68,13 @@ Fenêtre 2022-01 → 2026-05, 16 tickers, événement vol-normalisé (base rate 
   Journalisation quotidienne de **tous** les tickers (features complètes) dans
   `runtime/market_intelligence/tension.jsonl` via l'orchestrateur EOD
   (`tension_journal_path`, hors chemin critique, échec non bloquant).
+- **Périmètre : tout le registre (166 depuis PR #53 — portefeuille + watchlist)
+  + tout ticker watchlist pas encore au registre** (*tier tension*, filet de
+  sécurité : OHLCV fetché en un appel batch via `fetch_symbols`, aucun prérequis
+  registre/classification/facteur, symbole invalide → frame vide, jamais
+  journalisé). Un ajout `/modifywatchlist` est donc couvert par la tension le
+  soir même, avant son onboarding registre ; `registry_check` le signale en
+  info, pas en bloquant.
 - Bloc Telegram « ⚡ Tension — Layer C » ajouté au digest existant,
   uniquement sur les **débuts** d'épisode. Déterministe, zéro Warren/LLM.
 - `python3 -m market_intelligence.tension_outcomes` — mesure les épisodes dus

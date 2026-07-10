@@ -9,8 +9,9 @@ Location and structure of portfolio and watchlist files.
 | **Entry format** | Object | Object |
 | **Entry fields** | `symbol`, `name`, `sector` | `symbol`, `name`, `sector` |
 | **Example entry** | `{ "symbol": "BBAI", "name": "BigBear.ai", "sector": "IA défense" }` | `{ "symbol": "SMR", "name": "NuScale Power", "sector": "Nucléaire SMR" }` |
-| **Entry count** | 8 tickers | 8 tickers |
+| **Entry count** | 8 in the example (VPS file is the source of truth) | 8 in the example ; **~152 on the VPS** (grown via `/modifywatchlist`) |
 | **Additional fields** | `updated_at` (metadata) | `updated_at` (metadata) |
+| **Detection tier** | Layer B + Layer C (registry entry, classification and factor mapping required) | Layer B + C once in the registry (PR #53 onboarded all 152) ; a **new** add is covered by the tension tier (Layer C only) until onboarded |
 
 ## Usage in n8n Code node
 
@@ -50,5 +51,16 @@ Three supported paths — all converge on the same JSON files:
 Layer B (`market_intelligence/`) does not read these files directly: it uses
 `data/registry.json` (symbol → api_symbol → expected_name) plus
 `data/quarantine.json` so analysis never runs on a wrong or ambiguous ticker.
-Add a ticker → also add its registry entry (and sector ETF mapping in
-`data/sector_factors.json` if relevant).
+Add a **portfolio** ticker → also add its registry entry (and sector ETF
+mapping in `data/sector_factors.json` if relevant) — `registry_check` blocks
+the deploy otherwise.
+
+**Watchlist safety net (tension tier).** The EOD orchestrator also reads
+`watchlist.json` directly (`_load_watchlist_symbols`): any entry **not yet in
+the registry** is scanned by Layer C the same evening (tension: squeeze +
+quiet accumulation — see `docs/TENSION.md`), OHLCV fetched in one batched
+call, invalid symbols degrading to an empty frame (never journaled, never
+alerted). `registry_check` reports such a ticker as **info**, not blocking —
+the deploy never fails because someone added tickers via Telegram. Onboard the
+ticker to the registry to get full Layer B on it (beta gate, Warren research);
+as of PR #53 the entire current watchlist (152) is onboarded.

@@ -116,6 +116,38 @@ class TestJournalAndDigest:
         assert format_tension_digest({"BBB": ongoing}, as_of="2026-07-10") == ""
 
 
+class TestWatchlistTier:
+    def test_pipeline_journals_watchlist_tickers(self, tmp_path):
+        """Watchlist symbols (hors registre) sont scannés par le tier tension."""
+        from market_intelligence.eod_orchestrator import run_eod_anomaly_pipeline
+        from market_intelligence.registry_schema import load_registry
+
+        registry = load_registry()
+        symbols = [e.symbol for e in registry.portfolio_tickers]
+        closes = _wide_then_tight()  # squeeze sur la watchlist stub
+        frames = {s: _frame([100.0] * 80, [1e6] * 80) for s in symbols}
+
+        journal = tmp_path / "tension.jsonl"
+        run_eod_anomaly_pipeline(
+            registry=registry,
+            frame_fetcher=lambda days: frames,
+            short_interest_fetcher=lambda reg: {},
+            analyzer=lambda enriched: (),
+            dry_run=True, skip_warren=True,
+            journal_path=None,
+            tension_journal_path=journal,
+            watchlist_symbols=["WLTEST"],
+            watchlist_fetcher=lambda syms, days: {
+                s: _frame(closes, [1e6] * len(closes)) for s in syms
+            },
+        )
+        records = [json.loads(l) for l in journal.read_text().splitlines()]
+        by_symbol = {r["symbol"]: r for r in records}
+        assert "WLTEST" in by_symbol            # watchlist journalisée
+        assert set(symbols) <= set(by_symbol)   # portefeuille toujours couvert
+        assert by_symbol["WLTEST"]["squeeze"] is True
+
+
 class TestOutcomes:
     def test_explosion_measured_against_journaled_expected_move(self, tmp_path):
         tension_path = tmp_path / "tension.jsonl"
