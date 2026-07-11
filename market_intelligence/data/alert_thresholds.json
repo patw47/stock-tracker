@@ -174,6 +174,7 @@
     "XERS": "speculative",
     "ZIP": "speculative",
     "ZNTL": "speculative",
-    "ZVRA": "speculative"
+    "ZVRA": "speculative",
+    "F": "speculative"
   }
 }
