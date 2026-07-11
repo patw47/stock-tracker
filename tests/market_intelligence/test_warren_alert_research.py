@@ -132,6 +132,8 @@ def test_warren_prompt_explicitly_allows_no_identifiable_catalyst() -> None:
 
     assert "aucun catalyseur identifiable" in prompt
     assert "flux/technique/squeeze probable" in prompt
+    assert "INTERDIT : Markdown" in prompt
+    assert "traduction en français courant" in prompt
 
 
 def test_squeeze_flag_is_surfaced_in_warren_context() -> None:

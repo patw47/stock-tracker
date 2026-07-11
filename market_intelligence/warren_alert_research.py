@@ -40,6 +40,22 @@ _NO_CATALYST_RULE: Final[str] = (
     "aucun catalyseur identifiable - flux/technique/squeeze probable."
 )
 
+# Le digest échappe la prose Warren (html.escape) : tout Markdown ou HTML
+# s'affiche tel quel dans Telegram — d'où les règles texte brut ci-dessous.
+_OUTPUT_FORMAT_RULES: Final[tuple[str, ...]] = (
+    "Format de sortie (texte brut Telegram, AUCUN rendu riche) :",
+    "- INTERDIT : Markdown (###, **, *, tableaux |...|) et balises HTML — "
+    "ils s'affichent tels quels chez le lecteur.",
+    "- Structure : titres courts en MAJUSCULES précédés d'un emoji, puis puces "
+    "« • ». Une ligne vide entre sections. Jamais de tableau.",
+    "- Phrases courtes ; pas de note de style « rapport », c'est un message.",
+    "Pédagogie : à chaque terme technique cité (residual z, ATR expansion, "
+    "squeeze-prone, rvol, beta gate...), garde le jargon PUIS ajoute sa "
+    "traduction en français courant en une phrase — ex. « ATR expansion "
+    "(la fourchette de variation quotidienne s'élargit : le titre bouge "
+    "plus fort que d'habitude) ».",
+)
+
 _WARREN_MEMORY_DIR_DEFAULT: Final[str] = (
     "/home/warren/.openclaw/workspace-warren/memory/tickers"
 )
@@ -370,6 +386,7 @@ def build_alert_research_prompt(context: AlertResearchContext) -> str:
         _NO_CATALYST_RULE,
         "Si un statut ou une donnee est unknown/null, signale l'incertitude.",
         "Reponse attendue: catalyseur probable, preuves, signaux techniques/flux, risques de donnees, conclusion.",
+        *_OUTPUT_FORMAT_RULES,
         "",
     ]
     if context.past_analyses:
