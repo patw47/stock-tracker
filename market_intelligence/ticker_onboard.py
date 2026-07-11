@@ -19,6 +19,8 @@ DEFAULT_CLASSIFICATION = "speculative"
 ONBOARDED = "onboarded"
 ALREADY_PRESENT = "already_present"
 INVALID = "invalid"
+OFFBOARDED = "offboarded"
+NOT_PRESENT = "not_present"
 
 
 @dataclass(frozen=True)
@@ -139,12 +141,73 @@ def onboard_ticker(
     )
 
 
+def offboard_ticker(
+    symbol: str,
+    *,
+    registry_path: Path = REGISTRY_PATH,
+    thresholds_path: Path = ALERT_THRESHOLDS_PATH,
+    factors_path: Path = SECTOR_FACTORS_PATH,
+) -> OnboardResult:
+    """Remove a symbol from the Layer B referentials (mirror of onboard_ticker).
+
+    No network validation: the symbol is being retired, not vetted. Removes the
+    registry entry, the classification and any factor coverage (single_factor or
+    ETF mapping). Idempotent: an absent symbol touches nothing.
+    """
+    sym = symbol.strip().upper()
+    if not sym:
+        return OnboardResult(symbol=symbol, status=INVALID, reason="Symbole vide.")
+
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    thresholds = json.loads(thresholds_path.read_text(encoding="utf-8"))
+    factors = json.loads(factors_path.read_text(encoding="utf-8"))
+
+    generated: list[str] = []
+
+    tickers = registry.get("portfolio_tickers", [])
+    kept = [t for t in tickers if t.get("symbol") != sym]
+    if len(kept) != len(tickers):
+        registry["portfolio_tickers"] = kept
+        _atomic_write_json(registry_path, registry)
+        generated.append("registry.json → entrée retirée")
+
+    classifications = thresholds.get("classifications", {})
+    if sym in classifications:
+        del classifications[sym]
+        _atomic_write_json(thresholds_path, thresholds)
+        generated.append("alert_thresholds.json → classification retirée")
+
+    single_factor = factors.get("single_factor_symbols", [])
+    sector_map = factors.get("sector_factors", {})
+    fac_dirty = False
+    if sym in single_factor:
+        factors["single_factor_symbols"] = [s for s in single_factor if s != sym]
+        fac_dirty = True
+    if sym in sector_map:
+        del sector_map[sym]
+        fac_dirty = True
+    if fac_dirty:
+        _atomic_write_json(factors_path, factors)
+        generated.append("sector_factors.json → couverture facteur retirée")
+
+    if not generated:
+        return OnboardResult(symbol=sym, status=NOT_PRESENT)
+    logger.info("Offboarded %s: %s", sym, "; ".join(generated))
+    return OnboardResult(symbol=sym, status=OFFBOARDED, generated=tuple(generated))
+
+
 def format_result(result: OnboardResult) -> str:
     """Render an onboarding result as a short Telegram/CLI message."""
     if result.status == INVALID:
         return f"⛔ {result.symbol} : refusé — {result.reason} Aucun fichier modifié."
     if result.status == ALREADY_PRESENT:
         return f"ℹ️ {result.symbol} : déjà cohérent dans les référentiels, rien à générer."
+    if result.status == NOT_PRESENT:
+        return f"ℹ️ {result.symbol} : absent des référentiels, rien à retirer."
+    if result.status == OFFBOARDED:
+        lines = [f"🗑 {result.symbol} retiré des référentiels (plus de scan EOD) :"]
+        lines += [f"  • {g}" for g in result.generated]
+        return "\n".join(lines)
     lines = [f"🆕 {result.symbol} ({result.expected_name}) intégré aux référentiels :"]
     lines += [f"  • {g}" for g in result.generated]
     if result.manual_actions:

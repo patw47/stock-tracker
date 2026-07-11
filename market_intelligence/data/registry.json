@@ -26,11 +26,6 @@
       "expected_name": "Rigetti Computing"
     },
     {
-      "symbol": "VUZI",
-      "api_symbol": "VUZI",
-      "expected_name": "Vuzix"
-    },
-    {
       "symbol": "XYL",
       "api_symbol": "XYL",
       "expected_name": "Xylem"

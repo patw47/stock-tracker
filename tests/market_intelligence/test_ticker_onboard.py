@@ -18,8 +18,11 @@ from market_intelligence import registry_check, ticker_onboard
 from market_intelligence.ticker_onboard import (
     ALREADY_PRESENT,
     INVALID,
+    NOT_PRESENT,
+    OFFBOARDED,
     ONBOARDED,
     format_result,
+    offboard_ticker,
     onboard_ticker,
 )
 
@@ -174,3 +177,45 @@ def test_format_result_variants(monkeypatch, data_files):
 
     invalid = ticker_onboard.OnboardResult(symbol="Z", status=INVALID, reason="bad")
     assert "refusé" in format_result(invalid).lower()
+
+
+# --- offboarding (retrait des référentiels) --------------------------------
+
+
+def test_offboard_retire_toutes_les_entrees(monkeypatch, data_files):
+    _ok(monkeypatch)
+    reg, thr, fac = data_files
+    onboard_ticker("NVDA", **_paths(data_files))
+
+    result = offboard_ticker("nvda", **_paths(data_files))
+
+    assert result.status == OFFBOARDED
+    assert result.symbol == "NVDA"
+    assert len(result.generated) == 3
+    registry = json.loads(reg.read_text())
+    assert all(t["symbol"] != "NVDA" for t in registry["portfolio_tickers"])
+    assert "NVDA" not in json.loads(thr.read_text())["classifications"]
+    factors = json.loads(fac.read_text())
+    assert "NVDA" not in factors["single_factor_symbols"]
+    assert "NVDA" not in factors["sector_factors"]
+
+
+def test_offboard_retire_aussi_le_mapping_etf(data_files):
+    reg, thr, fac = data_files
+    result = offboard_ticker("OLD", **_paths(data_files))
+
+    assert result.status == OFFBOARDED
+    assert "OLD" not in json.loads(fac.read_text())["sector_factors"]
+    assert all(t["symbol"] != "OLD" for t in json.loads(reg.read_text())["portfolio_tickers"])
+
+
+def test_offboard_absent_ne_touche_rien(data_files):
+    reg, thr, fac = data_files
+    snapshot = (reg.read_text(), thr.read_text(), fac.read_text())
+
+    result = offboard_ticker("GHOST", **_paths(data_files))
+
+    assert result.status == NOT_PRESENT
+    assert result.generated == ()
+    assert (reg.read_text(), thr.read_text(), fac.read_text()) == snapshot
+    assert "rien à retirer" in format_result(result)
