@@ -1,0 +1,9 @@
+[Unit]
+Description=Surveille market_intelligence/data/ (onboarding/offboarding Telegram)
+
+[Path]
+PathChanged=/opt/apps/stock-tracker/market_intelligence/data
+Unit=referential-sync.service
+
+[Install]
+WantedBy=multi-user.target

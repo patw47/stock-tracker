@@ -1,0 +1,8 @@
+[Unit]
+Description=Stock Tracker referential sync (commit data/ vers git apres modification Telegram)
+
+[Service]
+Type=oneshot
+User=queenp
+WorkingDirectory=/opt/apps/stock-tracker
+ExecStart=/bin/bash /opt/apps/stock-tracker/deploy/referential-sync.sh

@@ -110,6 +110,15 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now tension-outcomes.timer >/dev/null 2>&1
 tn_timer=$(systemctl is-active tension-outcomes.timer 2>/dev/null || echo inactive)
 
+# 5e. Referential sync (Telegram → git) : path unit sur market_intelligence/data/,
+#     commit [skip ci] + push après onboarding/offboarding. Hors chemin critique.
+log "install/enable referential sync path unit"
+sudo cp "$REPO/deploy/referential-sync.service" /etc/systemd/system/referential-sync.service
+sudo cp "$REPO/deploy/referential-sync.path"    /etc/systemd/system/referential-sync.path
+sudo systemctl daemon-reload
+sudo systemctl enable --now referential-sync.path >/dev/null 2>&1
+rs_path=$(systemctl is-active referential-sync.path 2>/dev/null || echo inactive)
+
 overall="ok"
 if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
    || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ] \
@@ -126,4 +135,5 @@ echo "STATUS_WARREN=$warren_status"
 echo "STATUS_WATCHDOG_TIMER=$wd_timer"
 echo "STATUS_OUTCOME_TIMER=$ot_timer"
 echo "STATUS_TENSION_TIMER=$tn_timer"
+echo "STATUS_REFERENTIAL_SYNC=$rs_path"
 echo "STATUS_OVERALL=$overall"

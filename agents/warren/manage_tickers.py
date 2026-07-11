@@ -254,6 +254,20 @@ def _do_add(list_name: str, raw: str) -> None:
     send("\n".join(parts))
 
 
+def _offboard(symbol: str):
+    """Offboard a symbol from the Layer B referentials; None if unavailable.
+
+    Fail-soft, same contract as _onboard: the remove flow must never crash if
+    the market_intelligence package is missing on the host.
+    """
+    try:
+        from market_intelligence.ticker_onboard import offboard_ticker
+        return offboard_ticker(symbol)
+    except Exception as exc:  # pragma: no cover - defensive host guard
+        print(f"OFFBOARD_UNAVAILABLE {symbol}: {exc}", file=sys.stderr)
+        return None
+
+
 def _do_remove(list_name: str, selected: list) -> None:
     data = _load(FILES[list_name])
     sel = {s.upper() for s in selected}
@@ -266,10 +280,24 @@ def _do_remove(list_name: str, selected: list) -> None:
     data["tickers"] = [t for t in data["tickers"] if str(t.get("symbol", "")).upper() not in sel]
     _save(FILES[list_name], data)
     clear_pending()
-    send(
-        f"✅ <b>{', '.join(removed)}</b> removed from {LABEL[list_name]} ({_today()})\n"
-        f"\n{EMOJI[list_name]} {LABEL[list_name]}: {_summary(data)}"
-    )
+    # Offboard from the Layer B referentials — only when the symbol is gone from
+    # BOTH runtime lists (still watched via the other list = keep the scan).
+    other = next(name for name in FILES if name != list_name)
+    other_syms = set(_symbols(_load(FILES[other])))
+    offboard_msgs = []
+    for s in removed:
+        if s in other_syms:
+            continue
+        result = _offboard(s)
+        if result is not None:
+            offboard_msgs.append(format_onboard(result))
+    parts = [
+        f"✅ <b>{', '.join(removed)}</b> removed from {LABEL[list_name]} ({_today()})"
+    ]
+    if offboard_msgs:
+        parts.append("\n" + "\n".join(offboard_msgs))
+    parts.append(f"\n{EMOJI[list_name]} {LABEL[list_name]}: {_summary(data)}")
+    send("\n".join(parts))
 
 
 def cmd_handle_callback(data: str) -> None:
