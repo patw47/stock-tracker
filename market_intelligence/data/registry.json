@@ -824,11 +824,6 @@
       "symbol": "ZVRA",
       "api_symbol": "ZVRA",
       "expected_name": "Zevra Therapeutics, Inc."
-    },
-    {
-      "symbol": "F",
-      "api_symbol": "F",
-      "expected_name": "Ford Motor Company"
     }
   ],
   "macro_tickers": [

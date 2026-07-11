@@ -193,8 +193,7 @@
     "XERS",
     "ZIP",
     "ZNTL",
-    "ZVRA",
-    "F"
+    "ZVRA"
   ],
   "endogeneity_note": "Some securities are constituents of their sector ETF, but their weights are small; no endogeneity correction is applied."
 }
