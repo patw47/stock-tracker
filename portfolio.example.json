@@ -5,7 +5,6 @@
     { "symbol": "MMED", "name": "Minimed", "sector": "Diabète / technologie médicale" },
     { "symbol": "PRCH", "name": "Porch Group", "sector": "Assurance tech" },
     { "symbol": "RGTI", "name": "Rigetti Computing", "sector": "Informatique quantique" },
-    { "symbol": "VUZI", "name": "Vuzix", "sector": "Smart glasses / AR" },
     { "symbol": "XYL", "name": "Xylem", "sector": "Gestion de l'eau" },
     { "symbol": "NUAI", "name": "New Era Energy & Digital", "sector": "Software Infrastructure" }
   ],
