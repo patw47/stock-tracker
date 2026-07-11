@@ -129,7 +129,6 @@ def onboard_ticker(
     manual_actions = (
         f"Choisir un ETF facteur sectoriel pour {sym} dans sector_factors.json en PR "
         "si pertinent (défaut retenu : single_factor).",
-        "Reporter le diff des fichiers data/ vers git (pas de commit auto depuis le VPS).",
     )
     logger.info("Onboarded %s: %s", sym, "; ".join(generated))
     return OnboardResult(
