@@ -384,8 +384,17 @@ def build_alert_research_prompt(context: AlertResearchContext) -> str:
         "Utilise uniquement le contexte structure ci-dessous et la recherche produit/secteur fournie.",
         "Les Form 4 EDGAR sont des donnees structurees, pas une recherche web.",
         _NO_CATALYST_RULE,
-        "Si un statut ou une donnee est unknown/null, signale l'incertitude.",
-        "Reponse attendue: catalyseur probable, preuves, signaux techniques/flux, risques de donnees, conclusion.",
+        "Ne mentionne JAMAIS une donnée absente, unknown ou null : son absence "
+        "suffit à signaler le manque, l'énumérer ne fait que polluer. Pas de "
+        "section « risques de données » sans risque concret à signaler.",
+        "Section catalyseur fondamental : si aucune actualité, recherche ou Form 4 "
+        "exploitable, écris UNE seule ligne « Aucun catalyseur fondamental "
+        "identifiable. » — n'énumère pas les sources vides une par une.",
+        "Contexte macro : ne répète pas le brief macro du jour, il est déjà connu. "
+        "Donne seulement sa conclusion pour CE titre en une phrase — ex. « Le "
+        "contexte macro n'explique pas la baisse atypique sur ANAB : le mouvement "
+        "est isolé. »",
+        "Reponse attendue: catalyseur probable, preuves, signaux techniques/flux, conclusion.",
         *_OUTPUT_FORMAT_RULES,
         "",
     ]
