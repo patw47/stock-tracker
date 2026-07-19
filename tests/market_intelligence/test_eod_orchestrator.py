@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Mapping
 from dataclasses import replace
 
 import pandas as pd
@@ -12,10 +11,8 @@ import market_intelligence.eod_orchestrator as orchestrator
 from market_intelligence.eod_orchestrator import append_run_log
 from market_intelligence.candidate_alerts import CandidateAlert
 from market_intelligence.dedup_hysteresis import DeduplicatedAlert, SuppressionDetail
-from market_intelligence.macro_snapshot import MacroSnapshot
 from market_intelligence.registry_schema import Registry, TickerEntry
 from market_intelligence.short_interest import ShortInterestResult
-from market_intelligence.warren_alert_research import WarrenAlertAnalysis
 
 
 def _registry(symbols: tuple[str, ...] = ("AAA", "BBB")) -> Registry:
@@ -101,20 +98,6 @@ def _short(symbol: str) -> ShortInterestResult:
     )
 
 
-def _macro() -> MacroSnapshot:
-    return MacroSnapshot(
-        as_of="2026-06-02",
-        ten_year_yield=4.5,
-        iwm_close=102.0,
-        iwm_pct_change=2.0,
-        oil_close=102.0,
-        oil_pct_change=2.0,
-        vix_close=102.0,
-        dxy_close=102.0,
-        data_issues=(),
-    )
-
-
 def _minimal_pipeline(monkeypatch, **kwargs):
     """Run the pipeline with lightweight S1-S3 stubs, honoring caller doubles."""
     registry = _registry(("AAA",))
@@ -129,8 +112,6 @@ def _minimal_pipeline(monkeypatch, **kwargs):
         registry=registry,
         frame_fetcher=lambda days: _frames(("AAA",)),
         short_interest_fetcher=lambda source_registry: {"AAA": _short("AAA")},
-        macro_builder=lambda source_frames, source_registry: _macro(),
-        analyzer=lambda enriched_alerts: (),
     )
     defaults.update(kwargs)
     return orchestrator.run_eod_anomaly_pipeline(**defaults)
@@ -149,8 +130,6 @@ def _run_pipeline_with(monkeypatch, decisions, deduplicator, **kwargs):
         registry=registry,
         frame_fetcher=lambda days: _frames(symbols),
         short_interest_fetcher=lambda source_registry: {s: _short(s) for s in symbols},
-        macro_builder=lambda source_frames, source_registry: _macro(),
-        analyzer=lambda enriched_alerts: (),
         deduplicator=deduplicator,
         **kwargs,
     )
@@ -347,21 +326,14 @@ def test_no_flag_no_env_is_not_dry_run(monkeypatch) -> None:
     assert json.loads(json.dumps(result.to_dict()))["dry_run"] is False
 
 
-def test_skip_warren_builds_deterministic_digest_without_analyzer(monkeypatch) -> None:
+def test_dry_run_builds_deterministic_digest_without_llm(monkeypatch) -> None:
     monkeypatch.delenv("ANOMALY_DEDUP_READONLY", raising=False)
-    analyzer_calls: list[int] = []
-
-    def analyzer(enriched_alerts):
-        analyzer_calls.append(1)
-        return (WarrenAlertAnalysis("AAA", "prompt", "analysis", None),)  # type: ignore[arg-type]
 
     result = _minimal_pipeline(
         monkeypatch,
         deduplicator=lambda decisions, short_interest, *, readonly=False, **_kwargs: (
             _survivor("AAA"),
         ),
-        analyzer=analyzer,
-        skip_warren=True,
         dry_run=True,
     )
 
@@ -373,32 +345,24 @@ def test_skip_warren_builds_deterministic_digest_without_analyzer(monkeypatch) -
     assert "point sur AAA" in result.digest
     assert "Le filtre d'hystérésis" in result.digest
     assert result.dry_run is True
-    assert analyzer_calls == []
 
 
-def test_skip_warren_without_dry_run_is_allowed(monkeypatch) -> None:
+def test_official_run_emits_deterministic_digest(monkeypatch) -> None:
     monkeypatch.delenv("ANOMALY_DEDUP_READONLY", raising=False)
-    analyzer_calls: list[int] = []
 
-    def analyzer(enriched_alerts):
-        analyzer_calls.append(1)
-        return ()
-
-    # skip_warren no longer requires read-only mode: an official run commits dedup
-    # state AND emits a deterministic digest, so survivors are never latched
-    # silently. The stub deduplicator returns survivors without writing state.
+    # An official run commits dedup state AND emits a deterministic digest, so
+    # survivors are never latched silently. The stub deduplicator returns
+    # survivors without writing state. skip_warren is accepted as a no-op.
     result = _minimal_pipeline(
         monkeypatch,
         deduplicator=lambda decisions, short_interest, *, readonly=False, **_kwargs: (
             _survivor("AAA"),
         ),
-        analyzer=analyzer,
         skip_warren=True,
     )
 
     assert result.dry_run is False
     assert result.analysis_count == 0
-    assert analyzer_calls == []
     assert result.should_send is True
     assert "point sur AAA" in result.digest
 
@@ -503,195 +467,6 @@ def test_dry_run_has_no_run_id_or_pending(monkeypatch) -> None:
     assert payload["pending_state_path"] is None
 
 
-def test_pipeline_orders_s0_to_s7_and_calls_warren_only_for_survivors(
-    monkeypatch,
-) -> None:
-    calls: list[str] = []
-    registry = _registry()
-    decisions = {"AAA": _candidate("AAA"), "BBB": _candidate("BBB", is_candidate=False)}
-
-    def calculate_signals(frames: dict[str, pd.DataFrame]) -> dict:
-        calls.append("s1")
-        assert set(frames) == {"AAA", "BBB"}
-        return {
-            symbol: type(
-                "Signal",
-                (),
-                {"as_of": "2026-06-02", "bar_count": 2, "symbol": symbol},
-            )()
-            for symbol in frames
-        }
-
-    def calculate_gates(signals: dict, frames: dict[str, pd.DataFrame]) -> dict:
-        calls.append("s2")
-        assert set(signals) == {"AAA", "BBB"}
-        assert "IWM" in frames
-        return {"AAA": object(), "BBB": object()}
-
-    def evaluate(
-        signals: dict,
-        gates: dict,
-        *,
-        expected_as_of: str,
-        expected_symbols: tuple[str, ...],
-    ) -> dict[str, CandidateAlert]:
-        calls.append("s3")
-        assert expected_as_of == "2026-06-02"
-        assert expected_symbols == ("AAA", "BBB")
-        assert set(gates) == {"AAA", "BBB"}
-        return decisions
-
-    def short_interest(source_registry: Registry) -> dict[str, ShortInterestResult]:
-        calls.append("s4")
-        assert source_registry is registry
-        return {"AAA": _short("AAA"), "BBB": _short("BBB")}
-
-    def dedup(
-        source_decisions: dict[str, CandidateAlert],
-        source_short: dict[str, ShortInterestResult],
-        *,
-        readonly: bool = False,
-        **_kwargs: object,
-    ) -> tuple[DeduplicatedAlert, ...]:
-        calls.append("s5")
-        assert source_decisions is decisions
-        assert set(source_short) == {"AAA", "BBB"}
-        return (_survivor("AAA"),)
-
-    def macro_builder(
-        frames: Mapping[str, pd.DataFrame],
-        source_registry: Registry | None,
-    ) -> MacroSnapshot:
-        calls.append("s6")
-        assert source_registry is registry
-        assert "IWM" in frames
-        return _macro()
-
-    def analyzer(enriched_alerts: tuple) -> tuple[WarrenAlertAnalysis, ...]:
-        calls.append("s7")
-        assert len(enriched_alerts) == 1
-        assert enriched_alerts[0].alert.candidate.ticker == "AAA"
-        return (
-            WarrenAlertAnalysis(
-                ticker="AAA",
-                prompt="prompt",
-                analysis="AAA moved on idiosyncratic flow.",
-                context=None,  # type: ignore[arg-type]
-            ),
-        )
-
-    monkeypatch.setattr(orchestrator, "calculate_all", calculate_signals)
-    monkeypatch.setattr(orchestrator, "calculate_beta_gates", calculate_gates)
-    monkeypatch.setattr(orchestrator, "evaluate_candidates", evaluate)
-
-    result = orchestrator.run_eod_anomaly_pipeline(
-        registry=registry,
-        frame_fetcher=lambda days: _frames(),
-        short_interest_fetcher=short_interest,
-        deduplicator=dedup,
-        macro_builder=macro_builder,
-        analyzer=analyzer,
-        skip_warren=False,
-    )
-
-    assert calls == ["s1", "s2", "s3", "s4", "s5", "s6", "s7"]
-    assert result.survivor_count == 1
-    assert result.analysis_count == 1
-    assert result.should_send is True
-    assert "AAA moved on idiosyncratic flow." in result.digest
-
-
-def test_no_survivor_run_builds_macro_once_but_sends_no_digest(monkeypatch) -> None:
-    macro_calls = 0
-    analyzer_calls = 0
-    registry = _registry(("AAA",))
-
-    monkeypatch.setattr(
-        orchestrator,
-        "evaluate_candidates",
-        lambda *args, **kwargs: {"AAA": _candidate("AAA", is_candidate=False)},
-    )
-
-    def macro_builder(
-        frames: Mapping[str, pd.DataFrame],
-        source_registry: Registry | None,
-    ) -> MacroSnapshot:
-        nonlocal macro_calls
-        macro_calls += 1
-        return _macro()
-
-    def analyzer(enriched_alerts: tuple) -> tuple[WarrenAlertAnalysis, ...]:
-        nonlocal analyzer_calls
-        analyzer_calls += 1
-        assert enriched_alerts == ()
-        return ()
-
-    result = orchestrator.run_eod_anomaly_pipeline(
-        registry=registry,
-        frame_fetcher=lambda days: _frames(("AAA",)),
-        short_interest_fetcher=lambda source_registry: {"AAA": _short("AAA")},
-        deduplicator=lambda decisions, short_interest, *, readonly=False, **_kwargs: (),
-        macro_builder=macro_builder,
-        analyzer=analyzer,
-        skip_warren=False,
-    )
-
-    assert macro_calls == 1
-    assert analyzer_calls == 1
-    assert result.survivor_count == 0
-    assert result.should_send is False
-    assert result.digest == ""
-
-
-def test_macro_snapshot_is_reused_for_multiple_survivors(monkeypatch) -> None:
-    registry = _registry(("AAA", "BBB"))
-    snapshot = _macro()
-    seen_snapshot_ids: list[int] = []
-    macro_calls = 0
-
-    monkeypatch.setattr(
-        orchestrator,
-        "evaluate_candidates",
-        lambda *args, **kwargs: {"AAA": _candidate("AAA"), "BBB": _candidate("BBB")},
-    )
-
-    def macro_builder(
-        frames: Mapping[str, pd.DataFrame],
-        source_registry: Registry | None,
-    ) -> MacroSnapshot:
-        nonlocal macro_calls
-        macro_calls += 1
-        return snapshot
-
-    def analyzer(enriched_alerts: tuple) -> tuple[WarrenAlertAnalysis, ...]:
-        seen_snapshot_ids.extend(id(alert.macro_snapshot) for alert in enriched_alerts)
-        return (
-            WarrenAlertAnalysis("AAA", "prompt", "AAA analysis", None),  # type: ignore[arg-type]
-            WarrenAlertAnalysis("BBB", "prompt", "BBB analysis", None),  # type: ignore[arg-type]
-        )
-
-    result = orchestrator.run_eod_anomaly_pipeline(
-        registry=registry,
-        frame_fetcher=lambda days: _frames(("AAA", "BBB")),
-        short_interest_fetcher=lambda source_registry: {
-            "AAA": _short("AAA"),
-            "BBB": _short("BBB"),
-        },
-        deduplicator=lambda decisions, short_interest, *, readonly=False, **_kwargs: (
-            _survivor("AAA"),
-            _survivor("BBB"),
-        ),
-        macro_builder=macro_builder,
-        analyzer=analyzer,
-        skip_warren=False,
-    )
-
-    assert macro_calls == 1
-    assert seen_snapshot_ids == [id(snapshot), id(snapshot)]
-    # HTML format: 1 header <b> block + 2 per-ticker <b> blocks.
-    assert result.digest.count("</b>") == 3
-
-
 def test_missing_and_empty_ticker_frames_are_surfaced(monkeypatch) -> None:
     registry = _registry(("GOOD", "EMPTY", "MISSING"))
 
@@ -718,62 +493,18 @@ def test_missing_and_empty_ticker_frames_are_surfaced(monkeypatch) -> None:
             "MISSING": _short("MISSING"),
         },
         deduplicator=lambda decisions, short_interest, *, readonly=False, **_kwargs: (),
-        macro_builder=lambda source_frames, source_registry: _macro(),
-        analyzer=lambda enriched_alerts: (),
     )
 
     assert "empty_eod_frame:EMPTY" in result.data_issues
     assert "missing_eod_frame:MISSING" in result.data_issues
 
 
-def test_format_digest_returns_one_digest_for_all_analyses() -> None:
-    digest = orchestrator._format_warren_digest(
-        (
-            WarrenAlertAnalysis("AAA", "prompt", "AAA analysis", None),  # type: ignore[arg-type]
-            WarrenAlertAnalysis("BBB", "prompt", "BBB analysis", None),  # type: ignore[arg-type]
-        ),
-        as_of="2026-06-02",
-    )
-
-    assert "<b>EOD anomaly digest — 2026-06-02</b>" in digest
-    assert "Survivors: 2" in digest
-    assert "<b>1. AAA</b>" in digest
-    assert "<b>2. BBB</b>" in digest
-    assert "#" not in digest
-
-
-def test_format_digest_escapes_html_and_keeps_bold_balanced() -> None:
-    analyses = (
-        WarrenAlertAnalysis(  # type: ignore[arg-type]
-            "A<B", "prompt", "a < b & c > d _under_ *star* `tick`", None
-        ),
-        WarrenAlertAnalysis("C&D", "prompt", "plain prose", None),  # type: ignore[arg-type]
-    )
-    digest = orchestrator._format_warren_digest(analyses, as_of="2026-06-02")
-
-    # Special chars from prose/ticker are HTML-escaped.
-    assert "&lt;" in digest and "&gt;" in digest and "&amp;" in digest
-    assert "A&lt;B" in digest and "C&amp;D" in digest
-    # Bold tags balanced; the only raw '<' are the intended <b>/</b> tags.
-    assert digest.count("<b>") == digest.count("</b>") > 0
-    stripped = digest.replace("<b>", "").replace("</b>", "")
-    assert "<" not in stripped and ">" not in stripped
-
-
-def test_format_digest_has_no_markdown_heading() -> None:
-    digest = orchestrator._format_warren_digest(
-        (WarrenAlertAnalysis("AAA", "prompt", "AAA analysis", None),),  # type: ignore[arg-type]
-        as_of="2026-06-02",
-    )
-    assert "#" not in digest
-
-
 def test_split_telegram_html_keeps_bold_balanced_across_chunks() -> None:
-    analyses = tuple(
-        WarrenAlertAnalysis(f"T{i}", "prompt", "prose " * 20, None)  # type: ignore[arg-type]
-        for i in range(60)
+    # A long multi-paragraph HTML digest (each <b> tag confined to one paragraph)
+    # must split into <=limit chunks without ever orphaning a bold tag.
+    digest = "\n\n".join(
+        f"<b>{i}. T{i}</b>\n" + "prose " * 20 for i in range(60)
     )
-    digest = orchestrator._format_warren_digest(analyses, as_of="2026-06-02")
     assert len(digest) > 4000
 
     chunks = orchestrator.split_telegram_html(digest, limit=4000)

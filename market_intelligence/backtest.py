@@ -6,8 +6,9 @@ combien d'alertes/mois produit une combinaison de seuils, et quelle est la
 sensibilité au couple (speculative_z, rearm_z) ?
 
 Sécurité (rules du sprint) :
-- **Jamais l'état dedup ni le Warren de prod** : état dedup éphémère (fichiers tmp
-  par combinaison), analyzer stub (zéro Warren/OpenClaw), short_interest stub.
+- **Jamais l'état dedup de prod** : état dedup éphémère (fichiers tmp par
+  combinaison), short_interest stub. Le pipeline est 100 % déterministe (zéro
+  LLM) depuis Epic 6.
 - **Aucun changement de seuil en prod** : les combinaisons sont des overrides
   en mémoire (``dataclasses.replace``), le fichier de config n'est jamais réécrit.
 - **No-look-ahead** : chaque jour simulé ne voit que les barres <= ce jour
@@ -83,11 +84,6 @@ def default_grid() -> list[tuple[float, float]]:
 def _no_short_interest(_registry: Registry) -> dict:
     """Short-interest stub — no network, neutral (no squeeze) for every ticker."""
     return {}
-
-
-def _no_warren_analyzer(_enriched):
-    """Analyzer stub — guarantees zero Warren/OpenClaw calls during the backtest."""
-    return ()
 
 
 def _ephemeral_deduplicator(state_path: Path, dedup_config: DedupConfig):
@@ -176,7 +172,6 @@ def simulate_combo(
             registry=registry,
             frame_fetcher=_truncating_fetcher(frames, day),
             short_interest_fetcher=_no_short_interest,
-            analyzer=_no_warren_analyzer,
             deduplicator=_ephemeral_deduplicator(state_path, dedup_config),
             dry_run=True,
             skip_warren=True,

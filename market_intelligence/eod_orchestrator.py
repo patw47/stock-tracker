@@ -25,21 +25,12 @@ from market_intelligence.dedup_hysteresis import dedup_readonly_env
 from market_intelligence.dedup_hysteresis import deduplicate_alerts
 from market_intelligence.dedup_hysteresis import default_pending_path
 from market_intelligence.fetch_eod import fetch_all, fetch_symbols
-from market_intelligence.macro_snapshot import (
-    MacroSnapshot,
-    MacroSnapshotCache,
-    attach_macro_snapshot,
-)
 from market_intelligence.registry_schema import Registry, load_quarantine, load_registry
 from market_intelligence.short_interest import ShortInterestResult, fetch_all_short_interest
 from market_intelligence.tension_signals import (
     append_tension_journal,
     calculate_all as calculate_tension_signals,
     format_tension_digest,
-)
-from market_intelligence.warren_alert_research import (
-    WarrenAlertAnalysis,
-    analyze_alerts,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,10 +61,6 @@ class Deduplicator(Protocol):
         run_as_of: str | None = None,
         suppressions: list[SuppressionDetail] | None = None,
     ) -> tuple[DeduplicatedAlert, ...]: ...
-
-
-AlertAnalyzer = Callable[[Sequence[object]], tuple[WarrenAlertAnalysis, ...]]
-MacroBuilder = Callable[[Mapping[str, pd.DataFrame], Registry | None], MacroSnapshot]
 
 
 @dataclass(frozen=True)
@@ -226,77 +213,11 @@ def append_run_log(record: Mapping[str, object], path: Path = _RUNS_LOG_PATH) ->
             fcntl.flock(log_file.fileno(), fcntl.LOCK_UN)
 
 
-def _default_analyzer(
-    enriched_alerts: Sequence[object],
-) -> tuple[WarrenAlertAnalysis, ...]:
-    return analyze_alerts(enriched_alerts)
-
-
-def _build_macro_once(
-    cache: MacroSnapshotCache,
-    frames: Mapping[str, pd.DataFrame],
-    registry: Registry,
-    macro_builder: MacroBuilder | None,
-) -> None:
-    if macro_builder is None:
-        cache.get(frames, registry=registry)
-        return
-    cache.get(frames, registry=registry, builder=macro_builder)
-
-
-def _attach_cached_macro(
-    survivors: Sequence[DeduplicatedAlert],
-    frames: Mapping[str, pd.DataFrame],
-    cache: MacroSnapshotCache,
-    registry: Registry,
-    macro_builder: MacroBuilder | None,
-) -> tuple[object, ...]:
-    if macro_builder is None:
-        return attach_macro_snapshot(survivors, frames, cache=cache, registry=registry)
-    return attach_macro_snapshot(
-        survivors,
-        frames,
-        cache=cache,
-        registry=registry,
-        builder=macro_builder,
-    )
-
-
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _strip_html_tags(text: str) -> str:
     return _HTML_TAG_RE.sub("", text)
-
-
-def _format_warren_digest(
-    analyses: Sequence[WarrenAlertAnalysis],
-    *,
-    as_of: str | None,
-) -> str:
-    """Legacy Warren-prose digest (kept for the opt-in ``skip_warren=False`` path).
-
-    Superseded by the deterministic :func:`format_digest`; removed with the rest
-    of the Warren bridge in Epic 6 Sprint 4. Headings are Telegram-native (émoji +
-    ``<b>``) and every value coming from Warren prose / tickers / dates is
-    ``html.escape``d so no special character can break the send. Each ``<b>`` tag
-    stays within a single line so paragraph-based chunking never orphans a tag.
-    """
-    if not analyses:
-        return ""
-    date_label = html.escape(as_of or "unknown date")
-    lines = [
-        f"📊 <b>EOD anomaly digest — {date_label}</b>",
-        "",
-        f"Survivors: {len(analyses)}",
-        "",
-    ]
-    for index, analysis in enumerate(analyses, start=1):
-        text = analysis.analysis.strip() or "No Warren analysis returned."
-        lines.extend(
-            (f"<b>{index}. {html.escape(analysis.ticker)}</b>", html.escape(text), "")
-        )
-    return "\n".join(lines).strip()
 
 
 # ── Deterministic EOD digest (Epic 6, Sprint 3) ─────────────────────────────
@@ -558,8 +479,6 @@ def run_eod_anomaly_pipeline(
     frame_fetcher: FrameFetcher = fetch_all,
     short_interest_fetcher: ShortInterestFetcher = fetch_all_short_interest,
     deduplicator: Deduplicator = _default_deduplicator,
-    analyzer: AlertAnalyzer = _default_analyzer,
-    macro_builder: MacroBuilder | None = None,
     dry_run: bool = False,
     skip_warren: bool = True,
     journal_path: Path | None = None,
@@ -568,16 +487,15 @@ def run_eod_anomaly_pipeline(
     watchlist_symbols: Sequence[str] | None = None,
     watchlist_fetcher: Callable[[list[str], int], dict[str, pd.DataFrame]] = fetch_symbols,
 ) -> EodRunResult:
-    """Run S0-S7 once in the Sprint 8 deployment order.
+    """Run S0-S5 once in the Sprint 8 deployment order.
 
     ``dry_run`` (or the ``ANOMALY_DEDUP_READONLY`` env var) forwards read-only
-    mode to S5 so the dedup state file is never mutated. ``skip_warren`` (the
-    default since Epic 6 Sprint 3) skips the S6/S7 macro+Warren stage and renders
-    the digest deterministically from the survivors' signals + dedup state — zero
-    LLM. It no longer requires read-only mode: an official run now commits dedup
-    state *and* emits a real (deterministic) digest, so survivors are never
-    latched without an alert being sent. Set ``skip_warren=False`` to opt into the
-    legacy Warren prose (removed entirely in Sprint 4).
+    mode to S5 so the dedup state file is never mutated. The digest is rendered
+    deterministically from the survivors' signals + dedup state — zero LLM. An
+    official run commits dedup state *and* emits the digest, so survivors are
+    never latched without an alert being sent. The legacy opt-in Warren prose
+    stage (S6/S7) was removed in Epic 6 Sprint 4; ``skip_warren`` is accepted for
+    call-site compatibility but has no effect.
     """
     effective_dry_run = dry_run or dedup_readonly_env()
     ticker_registry = registry or load_registry()
@@ -645,38 +563,24 @@ def run_eod_anomaly_pipeline(
         except Exception as exc:  # pragma: no cover - defensive guard
             logger.error("tension layer failed (non-blocking): %s", exc)
 
-    if skip_warren:
-        analyses: tuple[WarrenAlertAnalysis, ...] = ()
-        digest = format_digest(
-            survivors,
-            signals,
-            as_of=as_of,
-            total_analyzed=len(decisions),
-            tension_block=tension_block,
-        )
-    else:
-        macro_cache = MacroSnapshotCache()
-        _build_macro_once(macro_cache, frames, ticker_registry, macro_builder)
-        enriched = _attach_cached_macro(
-            survivors,
-            frames,
-            macro_cache,
-            ticker_registry,
-            macro_builder,
-        )
-        analyses = analyzer(enriched)
-        digest = _format_warren_digest(analyses, as_of=as_of)
-        if tension_block:
-            digest = f"{digest}\n\n{tension_block}" if digest else tension_block
+    # Deterministic digest: survivor prose is canned, keyed by the dedup
+    # fire_reason, with the anomaly numbers slotted in — zero LLM. This is the
+    # only digest path (the opt-in Warren stage was removed in Epic 6 Sprint 4).
+    digest = format_digest(
+        survivors,
+        signals,
+        as_of=as_of,
+        total_analyzed=len(decisions),
+        tension_block=tension_block,
+    )
 
     issues = list(_missing_frame_issues(frames, ticker_registry))
     for decision in decisions.values():
         issues.extend(decision.data_issues)
     logger.info(
-        "EOD anomaly run complete: candidates=%d survivors=%d analyses=%d issues=%d",
+        "EOD anomaly run complete: candidates=%d survivors=%d issues=%d",
         sum(1 for decision in decisions.values() if decision.is_candidate),
         len(survivors),
-        len(analyses),
         len(issues),
     )
     result = EodRunResult(
@@ -685,7 +589,7 @@ def run_eod_anomaly_pipeline(
         fetched_symbols=tuple(sorted(frames)),
         candidate_count=sum(1 for decision in decisions.values() if decision.is_candidate),
         survivor_count=len(survivors),
-        analysis_count=len(analyses),
+        analysis_count=0,
         # A dry-run / read-only run (deploy validation) must never send Telegram,
         # even though the deterministic digest is now non-empty on survivor days.
         # Pre-S3 this held implicitly (skip_warren emitted an empty digest); make

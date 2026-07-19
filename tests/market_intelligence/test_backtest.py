@@ -119,7 +119,6 @@ def test_ephemeral_dedup_never_touches_prod(tmp_path):
 
 def test_stubs_are_inert():
     assert backtest._no_short_interest(None) == {}
-    assert backtest._no_warren_analyzer(["anything"]) == ()
 
 
 def test_backtest_runs_dry_and_skips_warren(tmp_path):
@@ -128,7 +127,6 @@ def test_backtest_runs_dry_and_skips_warren(tmp_path):
     for kwargs in calls:
         assert kwargs["dry_run"] is True
         assert kwargs["skip_warren"] is True
-        assert kwargs["analyzer"] is backtest._no_warren_analyzer
         assert kwargs["short_interest_fetcher"] is backtest._no_short_interest
         assert kwargs["journal_path"] is None
 

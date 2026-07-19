@@ -192,14 +192,8 @@ def _short(symbol: str) -> ShortInterestResult:
 
 
 def test_default_eod_path_never_calls_warren(monkeypatch) -> None:
-    """A spy Warren analyzer + macro builder that raise if touched prove zero LLM."""
+    """The pipeline has no LLM stage: analysis_count stays 0 and the digest is canned."""
     monkeypatch.delenv("ANOMALY_DEDUP_READONLY", raising=False)
-
-    def exploding_analyzer(enriched_alerts):
-        raise AssertionError("Warren analyze_alerts must not run in the default path")
-
-    def exploding_macro(frames, registry):
-        raise AssertionError("macro snapshot (Haiku) must not run in the default path")
 
     monkeypatch.setattr(orchestrator, "calculate_all", lambda frames: _signal_map())
     monkeypatch.setattr(orchestrator, "calculate_beta_gates", lambda signals, frames: {})
@@ -214,9 +208,7 @@ def test_default_eod_path_never_calls_warren(monkeypatch) -> None:
         frame_fetcher=lambda days: {"BBAI": _frame(), "HIMS": _frame()},
         short_interest_fetcher=lambda reg: {"BBAI": _short("BBAI"), "HIMS": _short("HIMS")},
         deduplicator=lambda decisions, short_interest, **kwargs: (_bbai(), _hims()),
-        analyzer=exploding_analyzer,   # spy: raises if called
-        macro_builder=exploding_macro,  # spy: raises if called
-        dry_run=True,                   # default skip_warren=True is exercised
+        dry_run=True,
     )
 
     assert result.analysis_count == 0

@@ -132,7 +132,6 @@ class TestWatchlistTier:
             registry=registry,
             frame_fetcher=lambda days: frames,
             short_interest_fetcher=lambda reg: {},
-            analyzer=lambda enriched: (),
             dry_run=True, skip_warren=True,
             journal_path=None,
             tension_journal_path=journal,

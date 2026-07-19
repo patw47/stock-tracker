@@ -15,10 +15,11 @@ push main → CI green ──► deploy.yml (workflow_run, runs-on: self-hosted)
                                    pip install -r requirements.txt   (system python)
                                    stop stock-tracker
                                    import_workflow.py  (sqlite upsert, queenp owns DB)
-                                   restart openclaw-warren → warren-server
+                                   décommission du pont Warren mort (disable --now warren-server)
+                                   restart openclaw-warren  (gateway on-demand)
                                    n8n execute --id=<wf>  (validation run, as warren, n8n stopped)
                                    start stock-tracker
-                                   healthcheck services + n8n :5680/healthz + bridge :18795
+                                   healthcheck services + n8n :5680/healthz
                               → Telegram status (✅/❌ + PROJECT_NAME + per-service state)
 ```
 
@@ -38,15 +39,12 @@ Trigger** node (besides the Schedule Trigger) because the CLI cannot start from 
 trigger. SKIP logic means no briefing is sent if there's no fresh news — expected; the
 deploy status message still arrives.
 
-**Python deps** — `warren_server.py` / `agents/warren` need `pydantic`, `requests` and
-`anthropic` (macro snapshot via web search); `market_intelligence/` needs `numpy`,
-`pandas`, `yfinance`, `pyarrow` (`requirements.txt`); `remote.sh` pip-installs them into
-the system python (the one `warren-server.service` runs) before restarting.
-
-**Service env** — `warren-server.service` must load `/opt/apps/stock-tracker/.env`
-(`EnvironmentFile=` directive — applied via drop-in `warren-server.service.d/override.conf`
-on the VPS, 2026-06-11) so the bridge has `ANTHROPIC_API_KEY` for the macro snapshot.
-Without it the briefing silently falls back to hardcoded macro values.
+**Python deps** — the EOD pipeline (`market_intelligence/` + its HTTP fetchers) needs
+`requests`, `numpy`, `pandas`, `yfinance`, `pyarrow` (`requirements.txt`); `remote.sh`
+pip-installs them into the system python (the one the EOD run + the systemd timers use)
+before restarting. The dead Warren HTTP bridge and its Python-only deps were removed in
+Epic 6 Sprint 4 — the deploy `disable --now`s the leftover unit so it is decommissioned
+automatically, with no manual VPS action.
 
 **Required GitHub secrets** — `TELEGRAM_ORCHESTRATION_BOT_TOKEN`,
 `TELEGRAM_ORCHESTRATION_CHAT_ID`, `PROJECT_NAME` (status message). No SSH secrets needed
@@ -106,7 +104,7 @@ Deux leviers, **l'un ou l'autre suffit** (ils se combinent en OR) :
 |--------|-------|
 | Flag CLI `--dry-run` | `deduplicate_alerts(readonly=True)` : les survivors sont calculés depuis l'état chargé mais `save_dedup_state` n'est **pas** appelé. Le flock exclusif est quand même pris (cohérence de lecture). |
 | Env `ANOMALY_DEDUP_READONLY=1` | Identique à `--dry-run`. Valeurs vraies : `1`, `true`, `yes`, `on` (insensible à la casse). Utile pour forcer le read-only sans toucher la ligne de commande. |
-| Flag CLI `--skip-warren` | Saute l'étage S6/S7 (macro + analyse Warren) : produit les survivors **sans appel LLM** (vérif rapide, coût nul). **Exige le dry-run** (`--dry-run` ou l'env) : sans lui, `run_eod_anomaly_pipeline` lève `ValueError` avant tout fetch — commiter l'état sans envoyer de digest latcherait les survivors comme « alertés » sans que rien ne parte (la classe d'incident visée par cet epic). |
+| Flag CLI `--skip-warren` | **No-op depuis Epic 6 S4** (le pont Warren mort a été retiré : le pipeline est déjà 100 % déterministe, sans appel LLM). Le flag reste accepté pour que la commande n8n déployée (`--dry-run --skip-warren`) continue de parser. Sans effet sur le dry-run. |
 
 Le JSON de sortie porte un champ **`dry_run: true|false`** (vrai dès que le flag **ou**
 l'env est actif) pour que n8n et les humains sachent si l'état a été persisté.
@@ -214,8 +212,8 @@ soir). Un test wiring vérifie que toute commande `executeCommand` contenant `{{
   (idempotent : multi-chunk Telegram, ou branche deploy dry-run qui n'écrit jamais de
   pending). Le `run_id` du nœud vient de `{{ $('Parse EOD Anomaly Result').item.json.run_id }}`.
 - **Sortie Telegram EOD dédiée** (`Send EOD Telegram`, credentials clonés) : le commit est
-  **EOD-exclusif**. Le macro-brief 16h garde la chaîne partagée `Aggregate → Split → Send
-  Telegram` et ne déclenche jamais de commit.
+  **EOD-exclusif** — seule la chaîne EOD promeut l'état dedup ; aucune autre sortie Telegram
+  ne déclenche de commit.
 - **Pending orphelin** (crash entre calcul et commit) : le run suivant recalcule **toujours
   depuis l'état réel** (l'orphelin n'est jamais lu), l'écrase et logge un warning.
 **`NODES_EXCLUDE=[]` (REQUIS dans `.env`)** — n8n 2.20+ exclut par défaut le nœud
