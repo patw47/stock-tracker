@@ -287,25 +287,3 @@ class TestBuildPromptWithMacroSnapshot:
         assert "signal" in result.lower() or "FIRST" in result
 
 
-class TestMacroProviderReturnType:
-    def test_get_snapshot_returns_macro_context(self) -> None:
-        """get_snapshot must return a MacroContext — mock all FRED network calls."""
-        with patch("agents.warren.macro_provider.requests.get") as mock_get:
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status.return_value = None
-            mock_resp.text = "DATE,VALUE\n2026-01-01,5.25\n"
-            mock_get.return_value = mock_resp
-
-            from agents.warren.macro_provider import get_snapshot
-
-            result = get_snapshot()
-            assert isinstance(result, MacroContext)
-
-    def test_get_snapshot_fallback_on_all_failures(self) -> None:
-        """When all FRED fetches fail, get_snapshot returns the hardcoded fallback."""
-        with patch("agents.warren.macro_provider.requests.get", side_effect=Exception("timeout")):
-            from agents.warren.macro_provider import get_snapshot
-
-            result = get_snapshot()
-            assert isinstance(result, MacroContext)
-            assert result.policy_rate is not None

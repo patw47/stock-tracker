@@ -76,60 +76,47 @@ class TestBuildPrompt:
 
 
 class TestWarrenServer:
-    """Test warren_server endpoint with mocked macro_provider."""
+    """Test warren_server endpoints."""
 
-    def test_server_returns_response_with_mocked_provider(self):
-        """Verify /synthesize endpoint returns non-error response with mocked provider."""
+    def test_synthesize_endpoint_returns_response(self):
+        """Verify /synthesize endpoint returns a synthesis response."""
         import json
         from io import BytesIO
 
-        # Import the handler after we can patch
-        with mock.patch("agents.warren.macro_provider.MacroContextProvider.fetch") as mock_fetch:
-            mock_fetch.return_value = MacroContext(
-                policy_rate=5.25,
-                cpi_yoy=3.2,
-                snapshot_date=date(2026, 5, 29),
-            )
+        from warren_server import Handler
 
-            from warren_server import Handler
-
-            # Create a mock request
-            handler = mock.MagicMock(spec=Handler)
-            handler.rfile = BytesIO(
-                json.dumps(
-                    {"news": {"AAPL": "Apple stock rose 2% on strong earnings"}}
-                ).encode("utf-8")
-            )
-            handler.headers = {
-                "Content-Length": str(
-                    len(
-                        json.dumps(
-                            {
-                                "news": {"AAPL": "Apple stock rose 2% on strong earnings"}
-                            }
-                        )
+        handler = mock.MagicMock(spec=Handler)
+        handler.rfile = BytesIO(
+            json.dumps(
+                {"news": {"AAPL": "Apple stock rose 2% on strong earnings"}}
+            ).encode("utf-8")
+        )
+        handler.headers = {
+            "Content-Length": str(
+                len(
+                    json.dumps(
+                        {"news": {"AAPL": "Apple stock rose 2% on strong earnings"}}
                     )
                 )
-            }
-            handler.wfile = BytesIO()
-            handler.path = "/synthesize"
-            handler.send_response = mock.MagicMock()
-            handler.send_header = mock.MagicMock()
-            handler.end_headers = mock.MagicMock()
-
-            # Call the actual handler method
-            request_body = json.dumps(
-                {"news": {"AAPL": "Apple stock rose 2% on strong earnings"}}
             )
-            result = Handler.handle_synthesize(
-                handler,
-                json.loads(request_body),
-            )
+        }
+        handler.wfile = BytesIO()
+        handler.path = "/synthesize"
+        handler.send_response = mock.MagicMock()
+        handler.send_header = mock.MagicMock()
+        handler.end_headers = mock.MagicMock()
 
-            # Verify response is JSON and contains synthesis key
-            response = json.loads(result)
-            assert "synthesis" in response
-            assert isinstance(response["synthesis"], str)
+        request_body = json.dumps(
+            {"news": {"AAPL": "Apple stock rose 2% on strong earnings"}}
+        )
+        result = Handler.handle_synthesize(
+            handler,
+            json.loads(request_body),
+        )
+
+        response = json.loads(result)
+        assert "synthesis" in response
+        assert isinstance(response["synthesis"], str)
 
     def test_server_filter_endpoint_with_no_news(self):
         """Verify /filter bootstraps empty memory before skipping NO_NEWS_TODAY."""

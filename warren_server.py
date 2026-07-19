@@ -4,7 +4,6 @@ Warren HTTP bridge for n8n.
 POST /filter      -- ticker-watch: classify tickers as NEW vs SKIP
 POST /synthesize  -- executive-synthesis: markdown briefing + write memory
 POST /memorize    -- silent memory write for NEW tickers only, no synthesis
-POST /macro-brief -- daily Market Context Brief (independent of ticker news)
 """
 from __future__ import annotations
 
@@ -19,12 +18,11 @@ import subprocess
 import threading
 import time
 
-try:
-    from agents.warren.macro_provider import get_snapshot, fetch_macro_snapshot, get_market_closes
-except ImportError:
-    get_snapshot = None
-    fetch_macro_snapshot = None
-    get_market_closes = None
+# Macro provider retiré avec le Macro Brief quotidien (Epic 6 S2). Le pont
+# Warren construit désormais ses prompts sans enrichissement macro ; le pont
+# lui-même est supprimé en S4.
+get_snapshot = None
+fetch_macro_snapshot = None
 
 try:
     from market_intelligence.sector_rotation import get_sector_rotation
@@ -207,8 +205,6 @@ class Handler(BaseHTTPRequestHandler):
             resp = self.handle_synthesize(body)
         elif self.path == "/memorize":
             resp = self.handle_memorize(body)
-        elif self.path == "/macro-brief":
-            resp = self.handle_macro_brief(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -338,82 +334,6 @@ class Handler(BaseHTTPRequestHandler):
             write_memory(sym, text.strip() if text else "", today)
             written.append(sym)
         return json.dumps({"status": "ok", "written": written})
-
-    def handle_macro_brief(self, body: dict) -> str:
-        """Build and return daily Market Context Brief, independent of ticker news."""
-        today = datetime.date.today().isoformat()
-
-        macro_context: MacroContext | None = None
-        if get_snapshot is not None:
-            try:
-                macro_context = get_snapshot()
-            except Exception as exc:
-                logger.warning("get_snapshot failed for macro brief: %s", exc)
-
-        market_closes: dict | None = None
-        if get_market_closes is not None:
-            try:
-                market_closes = get_market_closes()
-            except Exception as exc:
-                logger.warning("get_market_closes failed: %s", exc)
-
-        macro_snapshot = None
-        if fetch_macro_snapshot is not None:
-            try:
-                macro_snapshot = asyncio.run(fetch_macro_snapshot())
-            except Exception as exc:
-                logger.warning("fetch_macro_snapshot failed for macro brief: %s", exc)
-
-        sector_data: dict | None = None
-        if get_sector_rotation is not None:
-            try:
-                result = get_sector_rotation()
-                sector_data = {
-                    "entering": [
-                        (s.ticker, s.name, s.rel_perf_1d) for s in result.entering
-                    ],
-                    "exiting": [
-                        (s.ticker, s.name, s.rel_perf_1d) for s in result.exiting
-                    ],
-                    "iwm_rel_1d": result.iwm_rel_1d,
-                    "small_caps_trend": result.small_caps_trend,
-                }
-                if result.data_issues:
-                    logger.info("sector_rotation data_issues: %s", result.data_issues)
-            except Exception as exc:
-                logger.warning("get_sector_rotation failed: %s", exc)
-
-        fear_greed_data: dict | None = None
-        if get_fear_greed is not None:
-            try:
-                fg = get_fear_greed()
-                if fg is not None:
-                    fear_greed_data = {"score": fg.score, "label": fg.label}
-            except Exception as exc:
-                logger.warning("get_fear_greed failed: %s", exc)
-
-        query = f"[MACRO-BRIEF SKILL]\nDATE: {today}\n"
-        try:
-            prompt = build_prompt(
-                macro_context,
-                query,
-                macro_snapshot=macro_snapshot,
-                briefing_date=today,
-                market_closes=market_closes,
-                sector_data=sector_data,
-                fear_greed_data=fear_greed_data,
-            )
-            stdout = call_warren(prompt, "macro-brief")
-            brief = extract_inner(stdout).strip()
-            if not brief:
-                brief = "Données macro insuffisantes pour le brief d'aujourd'hui."
-        except Exception as exc:
-            logger.error("handle_macro_brief failed: %s", exc)
-            brief = f"Erreur lors de la génération du brief macro : {exc}"
-
-        # Producer-side HTML escaping: Send Telegram runs parse_mode=HTML, so the
-        # macro-brief prose must be escaped here (not in the n8n Code node).
-        return json.dumps({"brief": html.escape(brief)})
 
     def log_message(self, *_):
         """Silence default HTTPServer request logging."""
