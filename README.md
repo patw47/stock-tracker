@@ -23,14 +23,11 @@ Layer B EOD Schedule (21:30 UTC, Mon–Fri — DST-safe, always ≥ 30 min after
          │   S3 candidate alerts (calm |z|>2.0 / speculative |z|>2.5)
          │   S4 short interest → squeeze-prone flag
          │   S5 dedup (hysteresis latch per ticker)
-         │   S6 macro snapshot (computed once, cached, attached to every alert)
-         │   S7 Warren targeted research per surviving alert:
-         │      EDGAR Form 4 (structured) · product/sector news (yfinance)
-         │      halt status (FINRA) · SSR status (Nasdaq) · squeeze flag
-         │      ticker news memory (memory/tickers/) · macro snapshot
-         │      → explicitly allowed to answer "no identifiable catalyst"
-         │   S8 Layer C tension scan (registry + watchlist tickers, no LLM)
+         │   Layer C tension scan (registry + watchlist tickers, no LLM)
          │      → tension.jsonl journal + ⚡ digest block on new episodes
+         │   Deterministic digest (zero LLM) — canned per-survivor prose keyed by
+         │      the dedup fire_reason with the anomaly numbers slotted in; points
+         │      the reader to on-demand Warren (« point sur TICKER »)
          ▼
   JSON result { survivor_count, should_send, digest, data_issues,
                 candidates_detail, dry_run, run_id, pending_state_path }
@@ -60,7 +57,8 @@ alerted if the run had not happened at all).
 On speculative small caps, **price often moves before the news becomes public**
 (rumor, accumulation, squeeze). A pipeline that only reads news therefore arrives
 late. Layer B does not predict anything: it detects that **an unusual move has
-just happened**, then asks Warren to investigate. It is an attention detector,
+just happened**, then surfaces it for on-demand investigation (« point sur
+TICKER » to Warren). It is an attention detector,
 not a crystal ball — and that claim is now **measured**, not asserted: a
 no-look-ahead ablation over 2022-2026 ([docs/RESULTS.md](docs/RESULTS.md))
 shows directional hit rates of 41-49% (≈ coin flip) for every variant of the
@@ -127,15 +125,19 @@ unless something genuinely new happens: direction reversal, a new signal type,
 or a clear escalation. Safety valve: after about 10 trading days, the lock
 expires.
 
-### Step 5 — Warren investigates (and is allowed to find nothing)
+### Step 5 — Deterministic digest (and on-demand Warren)
 
-Only surviving alerts cost an LLM call. Warren receives a structured dossier:
-insider buying/selling (SEC EDGAR Form 4), product and sector news, trading
-suspension status (FINRA), short-sale restriction status (Nasdaq), a
-"squeeze-prone ticker" flag (short interest), the ticker's news memory, and the
-day's macro context. Warren must explain the move **without
-making things up**: the prompt explicitly allows it to conclude *"no identifiable
-catalyst — flow/technical/squeeze likely"*.
+Surviving alerts cost **zero LLM**. Each survivor is rendered with canned prose
+keyed by the dedup `fire_reason` (initial / escalation / new signal type /
+direction reversal) with the anomaly numbers slotted in, plus a squeeze-prone
+flag when relevant. The digest points the reader to Warren for a deeper look
+**on demand** — « point sur TICKER » — which is when insider buying/selling
+(SEC EDGAR Form 4), product and sector news, halt (FINRA) and SSR (Nasdaq)
+status and the ticker's news memory are pulled together. Warren is allowed to
+conclude *"no identifiable catalyst — flow/technical/squeeze likely"* rather
+than make things up. The dead n8n→OpenClaw HTTP bridge that used to run this
+per-alert automatically was removed in Epic 6 (deterministic digest is now the
+only alert path).
 
 ### What anomaly detection does not do
 
@@ -177,7 +179,7 @@ OHLCV fetched directly in one batched call, no registry entry, classification
 or sector-ETF mapping required. A ticker added via `/modifywatchlist` is
 therefore scanned by Layer C the **same evening**, before its registry
 onboarding; `registry_check` reports it as info, not blocking. Full Layer B
-(beta gate + Warren) requires the registry entry.
+(beta gate + candidate alerting) requires the registry entry.
 
 **Honesty section.** The phase-0 backtest (2022-2026, [docs/TENSION.md](docs/TENSION.md))
 found lift 1.5-1.66 for P(move > 2× the ATR-expected 20d move) after a tension
@@ -210,11 +212,10 @@ epics turned the demo into a system:
    survives, and alerts through the raw Telegram API), and a Friday heartbeat
    so weekly silence is bounded by a positive signal. Zero LLM in the whole
    chain.
-3. **Safe delivery** — LLM prose is untrusted input: everything sent to
-   Telegram is HTML-escaped producer-side (`parse_mode=HTML`), the 4,000-char
-   splitter never cuts a tag in half, the Warren bridge is a
-   `ThreadingHTTPServer` with a memory-write lock, and `Send Telegram` retries
-   ×3 with the final failure kept visible (no `continueOnFail`).
+3. **Safe delivery** — every value sent to Telegram is HTML-escaped
+   producer-side (`parse_mode=HTML`), the 4,000-char splitter never cuts a tag
+   in half, and `Send Telegram` retries ×3 with the final failure kept visible
+   (no `continueOnFail`).
 4. **Unified ticker referential** — `python3 -m
    market_intelligence.registry_check` is blocking in CI and at deploy time: a
    **portfolio** ticker can no longer be silently invisible to detection.
@@ -227,11 +228,9 @@ epics turned the demo into a system:
 5. **Track record** — J+1/J+5/J+20 outcomes are measured for sent alerts **and
    for gated candidates** (`outcome_tracker`, systemd timer 22:30 UTC), a
    monthly Telegram report aggregates them (with an honest "sample too small"
-   guard), a no-look-ahead backtest (`python3 -m market_intelligence.backtest
+   guard), and a no-look-ahead backtest (`python3 -m market_intelligence.backtest
    --start … --end …`) replays the deterministic pipeline over years of
-   history to calibrate thresholds, and Warren's alert prompt includes its own
-   past analyses for the ticker paired with the real outcomes (self-critique
-   loop, no confabulation when an outcome is unavailable).
+   history to calibrate thresholds.
 
 ---
 
@@ -269,9 +268,9 @@ Never hand-edit `portfolio.json` / `watchlist.json` — the flow goes through `a
 - **Transactional dedup state** — dry-run by default, two-phase commit after confirmed delivery
 - **Run journal + external watchdog + weekly heartbeat** — silence is informative, not ambiguous
 - **Referential consistency enforced** — `registry_check` blocking in CI and at deploy
-- **Self-measured signal** — J+1/J+5/J+20 outcomes, monthly report, no-look-ahead backtest, Warren self-critique
-- **systemd managed** — n8n, OpenClaw gateway, Warren HTTP bridge + watchdog/outcome timers
-- **CI/CD** — push to `main` → 507 tests → auto-deploy on the VPS via self-hosted runner (workflow version published, referential validated)
+- **Self-measured signal** — J+1/J+5/J+20 outcomes, monthly report, no-look-ahead backtest
+- **systemd managed** — n8n, OpenClaw gateway (on-demand Warren) + watchdog/outcome timers
+- **CI/CD** — push to `main` → 364 tests → auto-deploy on the VPS via self-hosted runner (workflow version published, referential validated)
 
 ---
 
@@ -282,12 +281,11 @@ Never hand-edit `portfolio.json` / `watchlist.json` — the flow goes through `a
 | **n8n** (self-hosted) | Scheduling, API calls, credential management, delivery |
 | **Claude Haiku** (`claude-haiku-4-5-20251001`) | Per-ticker raw news search via `web_search` + macro web search |
 | **OpenClaw** | Agent framework wrapping Claude for Warren |
-| **Warren** (OpenClaw agent) | Intelligence layer — filtering, memory, alert explanations |
-| **warren_server.py** | Python HTTP bridge between n8n and OpenClaw CLI (port 18795) |
-| **agents/warren/** | Prompt builder (persona, output format) + macro providers (FRED, web search, market closes) |
+| **Warren** (OpenClaw agent) | On-demand intelligence — ticker briefs ("point sur X"), Telegram ticker management |
+| **agents/warren/** | `manage_tickers.py` — add/remove tickers backing the Telegram skills |
 | **market_intelligence/** | Layer B — EOD fetch, anomaly signals, beta gate, dedup, EDGAR, short interest, orchestrator |
-| **market_intelligence/sector_rotation.py** | Sector ETF relative performance + IWM/SPY ratio — zero LLM, feeds Macro Brief |
-| **market_intelligence/fear_greed.py** | CNN Fear & Greed index fetch — zero LLM, feeds Macro Brief |
+| **market_intelligence/sector_rotation.py** | Sector ETF relative performance + IWM/SPY ratio — zero LLM |
+| **market_intelligence/fear_greed.py** | CNN Fear & Greed index fetch — zero LLM |
 
 ---
 
@@ -295,13 +293,12 @@ Never hand-edit `portfolio.json` / `watchlist.json` — the flow goes through `a
 
 ```
 stock-tracker/
-├── workflow.json              # n8n workflow (Macro Brief + Layer B EOD anomaly wiring)
-├── warren_server.py           # Python HTTP bridge (port 18795): /filter /memorize /macro-brief /synthesize(legacy)
+├── workflow.json              # n8n workflow (Layer B EOD anomaly wiring)
 ├── portfolio.json             # 8 portfolio tickers (source of truth)
 ├── watchlist.json             # 8 watchlist tickers (source of truth)
-├── requirements.txt           # Python deps (pydantic, requests, anthropic, numpy, pandas, yfinance, pyarrow)
-├── agents/warren/             # Prompt builder, macro providers (FRED, web search, market closes), ticker management
-├── market_intelligence/       # Layer B anomaly detection (S0–S7) + reliability & measurement tooling
+├── requirements.txt           # Python deps (requests, numpy, pandas, yfinance, pyarrow)
+├── agents/warren/             # manage_tickers.py — ticker management backing the Telegram skills
+├── market_intelligence/       # Layer B anomaly detection (S0–S5) + reliability & measurement tooling
 │   ├── eod_orchestrator.py    # Pipeline chief: dry-run flags, run journal, HTML-safe digest
 │   ├── dedup_hysteresis.py    # Hysteresis latch + suppression reasons + pending state (two-phase)
 │   ├── dedup_admin.py         # State admin CLI: show / reset / commit
@@ -315,11 +312,10 @@ stock-tracker/
 │   ├── fear_greed.py          # CNN Fear & Greed index (zero LLM)
 │   └── data/                  # registry, quarantine, thresholds, sector factors
 ├── skills/                    # OpenClaw skills sources
-│   ├── macrobrief/            # Macro Brief skill spec (SKILL.md)
 │   ├── tickerbrief/           # On-demand ticker brief skill spec (SKILL.md)
 │   ├── modifyportfolio/       # Portfolio management via Telegram (with Layer B onboarding)
 │   └── modifywatchlist/       # Watchlist management via Telegram (with Layer B onboarding)
-├── tests/                     # pytest suite — 507 tests (agents, market_intelligence, deploy, workflow wiring)
+├── tests/                     # pytest suite — 364 tests (agents, market_intelligence, deploy, workflow wiring)
 ├── docs/                      # project-structure, deployment, backtest guide, ticker schema
 ├── deploy/                    # CI/CD: remote.sh, import_workflow.py (version publish),
 │                              # watchdog_eod.py + systemd units/timers (watchdog, outcome tracker)
@@ -329,12 +325,10 @@ stock-tracker/
 ├── PROMPT.md / SOUL.md / IDENTITY.md / ...   # Warren agent definition
 ├── ARCHITECTURE.md                            # Pipeline documentation
 ├── skills/
-│   ├── ticker-watch/          # Filter skill (NEW vs SKIP)
-│   ├── macro-brief/           # Macro Brief skill (French prose, 150-300 words)
 │   ├── tickerbrief/           # On-demand ticker brief skill
 │   ├── modifyportfolio/       # Telegram portfolio management
 │   └── modifywatchlist/       # Telegram watchlist management
-└── memory/tickers/            # SYMBOL.md — last 3 raw news entries (read by Warren S7 / tickerbrief)
+└── memory/tickers/            # SYMBOL.md — last 3 raw news entries (read by tickerbrief)
 ```
 
 ---
@@ -415,9 +409,6 @@ sudo -u warren git clone https://github.com/patw47/stock-tracker.git /opt/apps/s
 cd /opt/apps/stock-tracker
 sudo pip3 install --break-system-packages -r requirements.txt
 ```
-
-> `anthropic` is required by the macro web search (Haiku `web_search` calls for Fed/geopolitics/sectors).
-> Without it the Macro Brief silently falls back to quantitative FRED data only.
 
 ---
 
@@ -541,42 +532,12 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-#### Warren HTTP bridge service
-
-```bash
-sudo nano /etc/systemd/system/warren-server.service
-```
-
-```ini
-[Unit]
-Description=Warren HTTP Bridge — n8n to OpenClaw
-After=network.target openclaw-warren.service
-Wants=openclaw-warren.service
-
-[Service]
-Type=simple
-User=warren
-Environment=HOME=/home/warren
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
-EnvironmentFile=/opt/apps/stock-tracker/.env
-ExecStart=/usr/bin/python3 /opt/apps/stock-tracker/warren_server.py
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-> `EnvironmentFile` is **required** on the bridge service: the Macro Brief
-> calls the Anthropic API directly (Haiku web search) and needs `ANTHROPIC_API_KEY`
-> in the process environment.
-
-Enable and start all three:
+Enable and start both:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable stock-tracker openclaw-warren warren-server
-sudo systemctl start openclaw-warren warren-server
+sudo systemctl enable stock-tracker openclaw-warren
+sudo systemctl start openclaw-warren
 sleep 3
 sudo systemctl start stock-tracker
 ```
@@ -584,10 +545,10 @@ sudo systemctl start stock-tracker
 Verify:
 
 ```bash
-sudo systemctl status stock-tracker openclaw-warren warren-server
+sudo systemctl status stock-tracker openclaw-warren
 ```
 
-All three should show `active (running)`.
+Both should show `active (running)`.
 
 ---
 
@@ -639,34 +600,6 @@ After creating credentials, check the node IDs in the workflow match. If they do
 
 ### 12. Smoke test
 
-Test the Warren HTTP bridge directly:
-
-```bash
-# Test filter endpoint
-curl -s -X POST http://127.0.0.1:18795/filter \
-  -H 'Content-Type: application/json' \
-  -d '{"news":{"OKLO":"NO_NEWS_TODAY","SMR":"NuScale signs PPA with Azure today"}}' \
-  | python3 -m json.tool
-
-# Expected: {"new": ["SMR"], "skip": ["OKLO"], "reasons": {...}}
-
-# Test memorize endpoint (silent memory write, no synthesis)
-curl -s -X POST http://127.0.0.1:18795/memorize \
-  -H 'Content-Type: application/json' \
-  -d '{"newTickers":["SMR"],"allNews":{"SMR":"NuScale signs PPA with Azure today"}}' \
-  | python3 -m json.tool
-
-# Expected: {"status": "ok", "written": ["SMR"]}
-
-# Test macro-brief endpoint
-curl -s -X POST http://127.0.0.1:18795/macro-brief \
-  -H 'Content-Type: application/json' \
-  -d '{}' \
-  | python3 -m json.tool
-
-# Expected: {"brief": "Le marché aborde cette séance dans un régime..."}
-```
-
 Test the Layer B pipeline end-to-end (prints a JSON payload):
 
 ```bash
@@ -696,10 +629,11 @@ push main → CI green ──► .github/workflows/deploy.yml  (runs-on: self-ho
                                    pip install -r requirements.txt
                                    stop stock-tracker  (release sqlite lock + free port 5679)
                                    import_workflow.py  (upsert workflow into sqlite)
-                                   restart openclaw-warren → warren-server
+                                   décommission du pont Warren mort (disable --now warren-server)
+                                   restart openclaw-warren  (gateway on-demand)
                                    n8n execute --id  (validation run, as warren, n8n stopped)
                                    start stock-tracker
-                                   healthcheck: services + n8n :5680/healthz + bridge :18795
+                                   healthcheck: services + n8n :5680/healthz
                               → Telegram status message (success / failure + per-service state)
 ```
 
@@ -731,10 +665,8 @@ Warren stores raw news per ticker in `/home/warren/.openclaw/workspace-warren/me
 
 - One file per ticker: `SYMBOL.md`
 - Max 3 entries, newest first, separated by `---`
-- No longer auto-populated — the Layer A `/memorize` collection was removed (Epic 6 S1); existing entries remain
-- **Also read by Layer B**: the anomaly research prompt includes this memory, so
-  Warren interprets a price move knowing what news already surfaced for the ticker
-- **Also read by `tickerbrief` skill**: on-demand context without triggering a new search
+- No longer auto-populated — the Layer A news collection was removed (Epic 6 S1); existing entries remain
+- **Read by the `tickerbrief` skill**: on-demand context without triggering a new search
 - To reset a ticker's memory: `rm memory/tickers/SYMBOL.md`
 - To reset all memory: `rm memory/tickers/*.md`
 
@@ -771,7 +703,7 @@ python3 -m market_intelligence.dedup_admin reset --ticker SYMBOL
 
 | Variable | Description |
 |---|---|
-| `ANTHROPIC_API_KEY` | Anthropic API key (Haiku web_search in n8n + macro brief Haiku calls in the bridge) |
+| `ANTHROPIC_API_KEY` | Anthropic API key (OpenClaw gateway — on-demand Warren; Haiku web_search in n8n) |
 | `TELEGRAM_TOKEN` | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | Target chat ID |
 | `TWELVE_DATA_API_KEY` | Layer B EOD data fallback (yfinance primary) |
@@ -781,7 +713,7 @@ python3 -m market_intelligence.dedup_admin reset --ticker SYMBOL
 | `N8N_BASIC_AUTH_USER` | n8n login username |
 | `N8N_BASIC_AUTH_PASSWORD` | n8n login password |
 | `N8N_ENCRYPTION_KEY` | Credentials encryption key (generate once, never change) |
-| `GENERIC_TIMEZONE` | Timezone for Macro Brief scheduling (`Europe/Paris`). Layer B cron is UTC by design (DST safety) |
+| `GENERIC_TIMEZONE` | n8n display timezone (`Europe/Paris`). Layer B cron is UTC by design (DST safety) |
 | `GMAIL_USER` / `GMAIL_PASS` | **Legacy** — email delivery was removed; Telegram only |
 
 ---
@@ -791,12 +723,10 @@ python3 -m market_intelligence.dedup_admin reset --ticker SYMBOL
 Specs and decision log live in the Notion epics database (« Epics Stock Tracker »)
 and the Obsidian vault (`Memory/stock-tracker/epics/`). Key choices:
 
-- **Macro Brief as main product** — daily market regime brief even with no ticker news
-- **`sector_rotation.py` + `fear_greed.py` zero-LLM** — quantitative signals injected into the Macro Brief without adding LLM cost
-- **Haiku for search** — cheaper, faster, sufficient for macro web search
-- **Layer A news collection removed** — Epic 6 S1 dropped the automatic Haiku news + Warren filter pipeline; `memory/tickers/` is now read-only context (Warren S7, tickerbrief)
-- **warren_server.py** — Python bridge needed because n8n sandboxes `fs` and `child_process` modules
-- **No LLM in the detection path** — Layer B anomalies are pure statistics; Warren is only paid for surviving alerts
+- **`sector_rotation.py` + `fear_greed.py` zero-LLM** — quantitative signals available on demand without adding LLM cost
+- **Layer A news collection removed** — Epic 6 S1 dropped the automatic Haiku news + Warren filter pipeline; `memory/tickers/` is now read-only context (tickerbrief)
+- **Warren HTTP bridge removed** — Epic 6 S4 dropped the dead n8n→OpenClaw bridge; the EOD digest is fully deterministic and Warren is on-demand only (Telegram "point sur X")
+- **No LLM in the alert path** — Layer B anomalies and the digest are pure statistics; Warren is on-demand only, never on the critical path
 - **Beta gate = market-model regression** (not naive z-score comparison) — avoids false alerts on broad risk-off days for high-beta names
 - **MAD scale, not standard deviation** — robust to the fat tails of speculative small-caps
 - **Hysteresis dedup** — one alert per event, not per day; re-arms when the ticker calms down

@@ -11,7 +11,6 @@ REPO="/opt/apps/stock-tracker"
 N8N_DB="$REPO/n8n-data/.n8n/database.sqlite"
 N8N_DATA="$REPO/n8n-data"
 N8N_PORT="${N8N_PORT:-5680}"
-WARREN_PORT="18795"
 
 log() { echo "[deploy] $*"; }
 
@@ -23,14 +22,21 @@ for L in watchlist portfolio; do
   [ -f "$REPO/$L.json" ] || cp "$REPO/$L.example.json" "$REPO/$L.json"
 done
 
-# 0. Dépendances Python du bridge Warren (warren_server.py utilise pydantic + requests).
-#    Installées dans le python système (/usr/bin/python3, celui du service warren-server).
+# 0. Dépendances Python du pipeline EOD (pandas/yfinance/numpy/pyarrow/requests).
+#    Installées dans le python système (/usr/bin/python3) qu'utilisent le run EOD
+#    et les timers systemd (watchdog, outcome-tracker, tension-outcomes).
 if [ -f "$REPO/requirements.txt" ]; then
   log "install deps python (requirements.txt)"
   sudo python3 -m pip install -r "$REPO/requirements.txt" --break-system-packages -q \
     || sudo python3 -m pip install -r "$REPO/requirements.txt" -q \
-    || log "WARN pip install a échoué — warren-server peut ne pas démarrer"
+    || log "WARN pip install a échoué — le run EOD peut ne pas démarrer"
 fi
+
+# 0b. Décommission du pont Warren mort (Epic 6 S4). Le bridge HTTP n'a plus aucun
+#     appelant : `disable --now` l'arrête ET le désactive pour que le déploiement
+#     auto le retire du VPS sans intervention manuelle. Idempotent (|| true).
+log "décommission du pont Warren mort (Epic 6 S4)"
+sudo systemctl disable --now warren-server 2>/dev/null || true
 
 # 1. Stop n8n avant l'import (évite tout verrou sqlite concurrent).
 log "stop stock-tracker"
@@ -52,9 +58,9 @@ log "validate ticker referential (registry_check)"
     --portfolio "$REPO/portfolio.json" --watchlist "$REPO/watchlist.json" )
 registry_rc=$?
 
-# 3. Relancer la stack Warren (openclaw + bridge). Le service n8n reste ARRÊTÉ pour l'instant.
+# 3. Relancer la gateway OpenClaw (Warren on-demand : « point sur X »,
+#    /modifyportfolio, /modifywatchlist). Le service n8n reste ARRÊTÉ pour l'instant.
 log "restart openclaw-warren"; sudo systemctl restart openclaw-warren; sleep 2
-log "restart warren-server";  sudo systemctl restart warren-server;  sleep 3
 
 # 4. Démarrer le service n8n.
 log "start stock-tracker"; sudo systemctl restart stock-tracker
@@ -63,22 +69,15 @@ sleep 8
 # 5. Healthchecks.
 st_active=$(systemctl is-active stock-tracker  2>/dev/null || echo inactive)
 oc_active=$(systemctl is-active openclaw-warren 2>/dev/null || echo inactive)
-ws_active=$(systemctl is-active warren-server   2>/dev/null || echo inactive)
 
 n8n_health="fail"
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$N8N_PORT/healthz" 2>/dev/null || echo 000)
 [ "$code" = "200" ] && n8n_health="ok"
 
-# Bridge Warren : pas de route GET, donc toute réponse HTTP (ex. 501) = process vivant.
-warren_http="fail"
-wcode=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$WARREN_PORT/" 2>/dev/null || echo 000)
-[ "$wcode" != "000" ] && warren_http="ok"
-
-# "warren tourne" = gateway openclaw active + bridge service active + port qui répond.
+# "warren tourne" = gateway OpenClaw active (le pont HTTP a été retiré en Epic 6 S4 ;
+# la chaîne Warren restante est on-demand, servie par la gateway).
 warren_status="inactive"
-if [ "$oc_active" = "active" ] && [ "$ws_active" = "active" ] && [ "$warren_http" = "ok" ]; then
-  warren_status="active"
-fi
+[ "$oc_active" = "active" ] && warren_status="active"
 
 # 5b. Watchdog EOD (Epic 2 S2) : installe/active le timer systemd. Indépendant de
 #     n8n — alerte Telegram si le run 21:30 UTC manque. N'influence pas overall
@@ -126,7 +125,7 @@ if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
   overall="fail"
 fi
 
-log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active bridge=$ws_active http=$wcode) watchdog_timer=$wd_timer outcome_timer=$ot_timer tension_timer=$tn_timer import_rc=$import_rc registry_rc=$registry_rc"
+log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active) watchdog_timer=$wd_timer outcome_timer=$ot_timer tension_timer=$tn_timer import_rc=$import_rc registry_rc=$registry_rc"
 
 # Lignes machine-lisibles consommées par deploy.yml.
 echo "STATUS_STOCK_TRACKER=$st_active"

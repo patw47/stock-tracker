@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from unittest.mock import Mock, patch
 
 import pytest
@@ -8,7 +7,6 @@ import pytest
 import market_intelligence.market_status as ms
 from market_intelligence.market_status import fetch_market_status
 from market_intelligence.registry_schema import TickerEntry
-from market_intelligence.warren_alert_research import analyze_alerts
 
 
 def _entry(symbol: str = "AAPL") -> TickerEntry:
@@ -170,12 +168,3 @@ def test_cache_http_called_once_per_source_across_multiple_tickers() -> None:
         fetch_market_status(_entry("GME"))
         fetch_market_status(_entry("SPY"))
     assert mock_get.call_count == 2
-
-
-# --- analyze_alerts default ---
-
-
-def test_analyze_alerts_uses_fetch_market_status_by_default() -> None:
-    sig = inspect.signature(analyze_alerts)
-    default = sig.parameters["market_status_fetcher"].default
-    assert default is fetch_market_status

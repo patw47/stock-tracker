@@ -2,15 +2,12 @@
 
 ```
 stock-tracker/
-├── workflow.json              # n8n workflow — Macro Brief + Layer B (EOD anomaly) wiring
-├── warren_server.py           # Python HTTP bridge n8n → OpenClaw (port 18795)
+├── workflow.json              # n8n workflow — Layer B (EOD anomaly) wiring
 ├── portfolio.json             # 8 portfolio tickers — source of truth (not versioned; see *.example.json)
 ├── watchlist.json             # 8 watchlist tickers — source of truth (not versioned)
-├── requirements.txt           # pydantic, requests, anthropic, numpy, pandas, yfinance, pyarrow
+├── requirements.txt           # requests, numpy, pandas, yfinance, pyarrow
 ├── agents/
 │   └── warren/
-│       ├── prompt_builder.py  # Warren persona + output format (briefing template, n8n skill rules)
-│       ├── models.py          # MacroContext / MacroSnapshot / UpcomingEvent
 │       └── manage_tickers.py  # add/remove tickers in the JSON files (Telegram skills backend)
 ├── market_intelligence/       # Layer B — EOD anomaly detection (no LLM in the critical path)
 │   ├── fetch_eod.py           # S0 — OHLCV batch (yfinance primary, Twelve Data fallback)
@@ -22,18 +19,15 @@ stock-tracker/
 │   ├── candidate_alerts.py    # S3 — thresholds calm/speculative, signal combination, direction
 │   ├── short_interest.py      # S4 — Yahoo short data → squeeze-prone flag
 │   ├── dedup_hysteresis.py    # S5 — latch/re-arm state machine per ticker (file-persisted)
-│   ├── macro_snapshot.py      # S6 — ^TNX/IWM/OIL/^VIX/DXY snapshot, computed once, cached
-│   ├── edgar_form4.py         # S7 — SEC EDGAR Form 4 structured fetch
-│   ├── web_research.py        # S7 — product news (yf.Ticker.news) + sector ETF news
-│   ├── market_status.py       # S7 — halt status (FINRA) + SSR status (Nasdaq), process-cached
-│   ├── warren_alert_research.py # S7 — AlertResearchContext + targeted Warren prompt/call
-│   ├── eod_orchestrator.py    # S8 — chains S0→S7, prints JSON {survivor_count, should_send, digest}
+│   ├── macro_snapshot.py      # ^TNX/IWM/OIL/^VIX/DXY snapshot (macro data, no LLM)
+│   ├── edgar_form4.py         # SEC EDGAR Form 4 structured fetch
+│   ├── market_status.py       # halt status (FINRA) + SSR status (Nasdaq), process-cached
+│   ├── eod_orchestrator.py    # chains S0→S5, deterministic digest, prints JSON {survivor_count, should_send, digest}
 │   └── data/                  # registry.json, quarantine.json, alert/dedup/short thresholds,
 │                              #   sector_factors.json (IWM + sector ETF mapping)
 ├── skills/                    # OpenClaw skill sources (synced to the Warren workspace)
 │   ├── modifyportfolio/       # Telegram: add/remove portfolio tickers
 │   ├── modifywatchlist/       # Telegram: add/remove watchlist tickers
-│   ├── macrobrief/            # n8n 16h: Market Context Brief quotidien
 │   └── tickerbrief/           # Telegram: brief à la demande sur un ticker précis (lecture seule)
 ├── tests/                     # pytest — agents/warren, market_intelligence, workflow wiring
 ├── docs/                      # this file, deployement.md, ticker-files-schema.md
@@ -53,7 +47,7 @@ stock-tracker/
 │   ├── modifywatchlist/       # Telegram watchlist management
 │   └── tickerbrief/           # Telegram on-demand ticker brief (read-only)
 └── memory/
-    └── tickers/               # SYMBOL.md — last 3 raw news entries (read by Warren S7 / tickerbrief)
+    └── tickers/               # SYMBOL.md — last 3 raw news entries (read by tickerbrief)
 ```
 
 Mirror copies of the workspace files are kept in the Obsidian vault under
