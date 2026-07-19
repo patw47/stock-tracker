@@ -136,7 +136,7 @@ def test_bridge_http_nodes_have_explicit_timeout():
     workflow = _workflow()
     nodes = _nodes_by_name(workflow)
 
-    for name in ("Call Warren Filter", "Call Memorize", "Call Warren Macro Brief"):
+    for name in ("Call Warren Macro Brief",):
         node = nodes[name]
         timeout = node["parameters"].get("options", {}).get("timeout")
         assert timeout is not None, f"{name} has no explicit timeout"

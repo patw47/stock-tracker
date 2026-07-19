@@ -2,7 +2,7 @@
 
 ```
 stock-tracker/
-├── workflow.json              # n8n workflow — Layer A (news) + Layer B (EOD anomaly) wiring
+├── workflow.json              # n8n workflow — Macro Brief + Layer B (EOD anomaly) wiring
 ├── warren_server.py           # Python HTTP bridge n8n → OpenClaw (port 18795)
 ├── portfolio.json             # 8 portfolio tickers — source of truth (not versioned; see *.example.json)
 ├── watchlist.json             # 8 watchlist tickers — source of truth (not versioned)
@@ -54,7 +54,7 @@ stock-tracker/
 │   ├── modifywatchlist/       # Telegram watchlist management
 │   └── tickerbrief/           # Telegram on-demand ticker brief (read-only)
 └── memory/
-    └── tickers/               # SYMBOL.md — last 3 raw news entries (read by both layers)
+    └── tickers/               # SYMBOL.md — last 3 raw news entries (read by Warren S7 / tickerbrief)
 ```
 
 Mirror copies of the workspace files are kept in the Obsidian vault under
