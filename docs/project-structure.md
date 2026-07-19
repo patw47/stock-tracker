@@ -10,7 +10,6 @@ stock-tracker/
 ├── agents/
 │   └── warren/
 │       ├── prompt_builder.py  # Warren persona + output format (briefing template, n8n skill rules)
-│       ├── macro_provider.py  # MacroContext (FRED) + MacroSnapshot (web search geopolitics/Fed/dollar)
 │       ├── models.py          # MacroContext / MacroSnapshot / UpcomingEvent
 │       └── manage_tickers.py  # add/remove tickers in the JSON files (Telegram skills backend)
 ├── market_intelligence/       # Layer B — EOD anomaly detection (no LLM in the critical path)
