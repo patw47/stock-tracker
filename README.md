@@ -6,7 +6,7 @@ Deterministic EOD anomaly detection, one Telegram channel:
 
 | Layer | What | When | LLM? |
 |---|---|---|---|
-| **B — Anomaly detection (EOD)** | Price/volume anomaly scan → beta gate → dedup → targeted Warren explanation | 21:30 UTC, Mon–Fri (after US close) | **Zero LLM in the detection path** — Warren only called for surviving alerts |
+| **B — Anomaly detection (EOD)** | Price/volume anomaly scan → beta gate → dedup → **deterministic digest** | 21:30 UTC, Mon–Fri (after US close) | **Zero LLM** — the digest is pure Python (signals + hysteresis reason); Warren is on-demand only (`point sur TICKER`) |
 
 ---
 
@@ -279,7 +279,6 @@ Never hand-edit `portfolio.json` / `watchlist.json` — the flow goes through `a
 | Component | Role |
 |---|---|
 | **n8n** (self-hosted) | Scheduling, API calls, credential management, delivery |
-| **Claude Haiku** (`claude-haiku-4-5-20251001`) | Per-ticker raw news search via `web_search` + macro web search |
 | **OpenClaw** | Agent framework wrapping Claude for Warren |
 | **Warren** (OpenClaw agent) | On-demand intelligence — ticker briefs ("point sur X"), Telegram ticker management |
 | **agents/warren/** | `manage_tickers.py` — add/remove tickers backing the Telegram skills |
@@ -683,7 +682,6 @@ systemctl list-timers eod-watchdog.timer outcome-tracker.timer
 sudo systemctl restart openclaw-warren warren-server stock-tracker
 
 # Logs
-sudo journalctl -u warren-server -f       # Python bridge logs
 sudo journalctl -u stock-tracker -f       # n8n logs
 sudo journalctl -u openclaw-warren -f     # OpenClaw logs
 sudo journalctl -u eod-watchdog.service -n 20   # last watchdog verdict
@@ -703,7 +701,7 @@ python3 -m market_intelligence.dedup_admin reset --ticker SYMBOL
 
 | Variable | Description |
 |---|---|
-| `ANTHROPIC_API_KEY` | Anthropic API key (OpenClaw gateway — on-demand Warren; Haiku web_search in n8n) |
+| `ANTHROPIC_API_KEY` | Anthropic API key (OpenClaw gateway — on-demand Warren) |
 | `TELEGRAM_TOKEN` | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | Target chat ID |
 | `TWELVE_DATA_API_KEY` | Layer B EOD data fallback (yfinance primary) |
