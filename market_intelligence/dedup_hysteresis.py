@@ -88,12 +88,15 @@ class TickerDedupState:
 
 @dataclass(frozen=True)
 class DeduplicatedAlert:
-    """Represent a genuinely new alert that may proceed to Warren."""
+    """Represent a genuinely new alert that may proceed to the digest."""
 
     candidate: CandidateAlert
     squeeze_prone: bool | None
     fire_reason: FireReason
     signal_types: tuple[str, ...]
+    # On an escalation, the |z| level that triggered the *previous* alert, so the
+    # digest can say "il avait déclenché à −2,4". None for every other fire_reason.
+    prev_trigger_z_resid: float | None = None
 
 
 SuppressionReason = Literal[
@@ -639,6 +642,9 @@ def _deduplicate_locked(
                 squeeze_prone=_squeeze_flag(squeeze),
                 fire_reason=reason,
                 signal_types=merged_types,
+                prev_trigger_z_resid=(
+                    previous.trigger_z_resid if reason == "escalation" else None
+                ),
             )
         )
 

@@ -269,17 +269,18 @@ def _strip_html_tags(text: str) -> str:
     return _HTML_TAG_RE.sub("", text)
 
 
-def format_digest(
+def _format_warren_digest(
     analyses: Sequence[WarrenAlertAnalysis],
     *,
     as_of: str | None,
 ) -> str:
-    """Aggregate all S7 analyses into one Telegram-ready digest (parse_mode=HTML).
+    """Legacy Warren-prose digest (kept for the opt-in ``skip_warren=False`` path).
 
-    Headings are Telegram-native (émoji + ``<b>``) and every value coming from
-    Warren prose / tickers / dates is ``html.escape``d so no special character
-    (`_ * < > & ``` `) can break the send. Each ``<b>`` tag stays within a single
-    line so paragraph-based chunking never orphans a tag.
+    Superseded by the deterministic :func:`format_digest`; removed with the rest
+    of the Warren bridge in Epic 6 Sprint 4. Headings are Telegram-native (émoji +
+    ``<b>``) and every value coming from Warren prose / tickers / dates is
+    ``html.escape``d so no special character can break the send. Each ``<b>`` tag
+    stays within a single line so paragraph-based chunking never orphans a tag.
     """
     if not analyses:
         return ""
@@ -296,6 +297,228 @@ def format_digest(
             (f"<b>{index}. {html.escape(analysis.ticker)}</b>", html.escape(text), "")
         )
     return "\n".join(lines).strip()
+
+
+# ── Deterministic EOD digest (Epic 6, Sprint 3) ─────────────────────────────
+# Zero LLM: survivor prose is canned, keyed by the dedup ``fire_reason``, with
+# the anomaly numbers slotted in. Telegram parse_mode=HTML — every dynamic value
+# is ``html.escape``d and each ``<b>`` tag stays on one line (shared doctrine).
+
+_DIGEST_SEP: Final[str] = "─" * 28
+
+_DIRECTION_WORD: Final[dict[str, str]] = {"up": "hausse ↑", "down": "baisse ↓"}
+
+_FIRE_LABEL: Final[dict[str, str]] = {
+    "initial": "première alerte",
+    "escalation": "escalade",
+    "new_signal_type": "nouveau signal",
+    "direction_reversal": "renversement",
+}
+
+_SIGNAL_LABEL: Final[dict[str, str]] = {
+    "rvol": "volume relatif",
+    "volume_z": "volume anormalement élevé",
+    "atr_expansion": "volatilité en expansion (ATR)",
+    "breakout_high_52w": "cassure du plus-haut 52 semaines",
+    "breakout_low_52w": "cassure du plus-bas 52 semaines",
+    "residual_z": "mouvement anormal (z-résiduel)",
+    "short_history_return": "fort rendement (historique court)",
+}
+
+# Verb phrasing for the "il casse en plus …" escalation clause (matches the epic
+# template verbatim; the noun forms above feed the descriptive prose elsewhere).
+_BREAKOUT_VERB: Final[dict[str, str]] = {
+    "breakout_high_52w": "casse en plus son plus-haut 52 semaines",
+    "breakout_low_52w": "casse en plus son plus-bas 52 semaines",
+}
+
+_HYSTERESIS_BLOCK: Final[str] = "\n".join(
+    (
+        "ℹ️ <b>Le filtre d'hystérésis — pourquoi si peu d'alertes ?</b>",
+        "",
+        "Un ticker n'alerte qu'UNE fois en franchissant son seuil (z-résiduel "
+        "~2,5). Il est ensuite « verrouillé » et reste silencieux tant qu'il ne "
+        "fait rien de neuf. Il ne réapparaît que dans 4 cas :",
+        " • escalade — son z-résiduel s'aggrave d'au moins +1,0",
+        " • renversement — la direction s'inverse (hausse ↔ baisse)",
+        " • nouveau signal — un type de signal s'ajoute (volume, cassure 52 sem…)",
+        " • ré-armement — il retombe au calme (sous 1,0) puis re-franchit le seuil",
+    )
+)
+
+
+def _fr(value: float, *, signed: bool = False, decimals: int = 1) -> str:
+    """Format a number the French way: comma decimal, U+2212 minus, optional sign."""
+    text = f"{value:+.{decimals}f}" if signed else f"{value:.{decimals}f}"
+    return text.replace("-", "−").replace(".", ",")
+
+
+def _volume_clause(signal_types: tuple[str, ...], signal: AnomalySignals | None) -> str:
+    if signal is None:
+        return ""
+    parts: list[str] = []
+    if "rvol" in signal_types and signal.rvol is not None:
+        parts.append(f"un volume relatif de {_fr(signal.rvol)}× la normale")
+    if "volume_z" in signal_types and signal.log_volume_z is not None:
+        parts.append(
+            f"un volume anormalement élevé (z {_fr(signal.log_volume_z, signed=True)})"
+        )
+    if not parts:
+        return ""
+    return "Mouvement porté par " + " et ".join(parts) + "."
+
+
+def _gap_atr_clause(signal_types: tuple[str, ...], signal: AnomalySignals | None) -> str:
+    if signal is None:
+        return ""
+    parts: list[str] = []
+    if signal.opening_gap is not None:
+        parts.append(f"Gap d'ouverture {_fr(100 * signal.opening_gap, signed=True)} %")
+    if "atr_expansion" in signal_types and signal.atr_expansion_ratio is not None:
+        parts.append(f"volatilité en expansion (ATR ×{_fr(signal.atr_expansion_ratio)})")
+    for breakout in ("breakout_high_52w", "breakout_low_52w"):
+        if breakout in signal_types:
+            parts.append(_SIGNAL_LABEL[breakout])
+    if not parts:
+        return ""
+    sentence = ", ".join(parts)
+    return sentence[0].upper() + sentence[1:] + "."
+
+
+def _opening_sentence(ticker: str, alert: DeduplicatedAlert) -> str:
+    if alert.fire_reason == "initial":
+        return (
+            f"Première alerte : {ticker} n'était pas encore « verrouillé » et "
+            "vient de franchir son seuil de déclenchement."
+        )
+    if alert.fire_reason == "new_signal_type":
+        added = ", ".join(
+            _SIGNAL_LABEL[s] for s in alert.signal_types if s in _SIGNAL_LABEL
+        )
+        return (
+            f"Nouveau signal : {ticker} était déjà verrouillé mais présente un "
+            f"type de signal jusqu'ici absent ({added})."
+        )
+    # direction_reversal
+    return (
+        f"Renversement : {ticker} était verrouillé dans l'autre sens et bascule "
+        "— l'anomalie repart en direction opposée."
+    )
+
+
+def _standard_prose(
+    ticker: str, alert: DeduplicatedAlert, signal: AnomalySignals | None
+) -> str:
+    """Prose for initial / new_signal_type / direction_reversal (signals slotted in)."""
+    candidate = alert.candidate
+    sentences = [_opening_sentence(ticker, alert)]
+    volume = _volume_clause(alert.signal_types, signal)
+    if volume:
+        sentences.append(volume)
+    if candidate.z_resid is not None:
+        threshold = (
+            f" (seuil {_fr(candidate.residual_threshold)})"
+            if candidate.residual_threshold is not None
+            else ""
+        )
+        sentences.append(
+            f"Son z-résiduel atteint {_fr(candidate.z_resid, signed=True)}{threshold} "
+            "— le titre bouge nettement plus que son comportement habituel."
+        )
+    tail = _gap_atr_clause(alert.signal_types, signal)
+    if tail:
+        sentences.append(tail)
+    return " ".join(sentences)
+
+
+def _escalation_prose(ticker: str, alert: DeduplicatedAlert) -> str:
+    candidate = alert.candidate
+    z_resid = candidate.z_resid
+    prev = alert.prev_trigger_z_resid
+    z_text = _fr(z_resid, signed=True) if z_resid is not None else "?"
+    prev_text = _fr(prev, signed=True) if prev is not None else "?"
+    if z_resid is not None and prev is not None:
+        margin = (
+            f", soit {_fr(abs(z_resid) - abs(prev), signed=True)} au-delà du niveau "
+            "qui l'avait fait alerter"
+        )
+    else:
+        margin = ""
+    sentences = [
+        f"Escalade : {ticker} était déjà verrouillé (il avait déclenché à "
+        f"{prev_text}), mais son z-résiduel s'est aggravé jusqu'à {z_text}{margin}."
+    ]
+    verbs = [
+        _BREAKOUT_VERB[b]
+        for b in ("breakout_high_52w", "breakout_low_52w")
+        if b in alert.signal_types
+    ]
+    if verbs:
+        sentences.append("Il " + " et ".join(verbs) + ".")
+    return " ".join(sentences)
+
+
+def _survivor_block(
+    index: int, alert: DeduplicatedAlert, signal: AnomalySignals | None
+) -> str:
+    candidate = alert.candidate
+    ticker = html.escape(candidate.ticker)
+    direction = _DIRECTION_WORD.get(candidate.direction or "", "")
+    label = _FIRE_LABEL.get(alert.fire_reason, alert.fire_reason)
+    header = f"<b>{index}. {ticker} — {direction}   [{label}]</b>"
+    if alert.fire_reason == "escalation":
+        paragraph = _escalation_prose(ticker, alert)
+    else:
+        paragraph = _standard_prose(ticker, alert, signal)
+    lines = [header, "", paragraph]
+    if alert.squeeze_prone is True:
+        lines.append("⚠ Profil squeeze possible (short interest élevé).")
+    lines.append(f"→ Pour l'analyse Warren : « point sur {ticker} »")
+    return "\n".join(lines)
+
+
+def format_digest(
+    survivors: Sequence[DeduplicatedAlert],
+    signals: Mapping[str, AnomalySignals],
+    *,
+    as_of: str | None,
+    total_analyzed: int,
+    tension_block: str = "",
+) -> str:
+    """Render survivors + tension into one deterministic Telegram digest (HTML).
+
+    Zero LLM: the per-survivor prose is canned, keyed by the dedup ``fire_reason``,
+    with the anomaly numbers slotted in. Sections (fixed header, one block per
+    survivor sorted by ``|z_resid|`` descending, the existing tension block, and
+    the fixed hysteresis explainer) are joined by a dashed rule, reproducing the
+    frozen Epic 6 template. Every value from tickers/dates is ``html.escape``d and
+    each ``<b>`` tag stays on one line. Returns ``""`` when there is nothing to send.
+    """
+    ordered = sorted(
+        survivors, key=lambda a: abs(a.candidate.z_resid or 0.0), reverse=True
+    )
+    sections: list[str] = []
+    if ordered:
+        count = len(ordered)
+        noun = "survivant" if count == 1 else "survivants"
+        sections.append(
+            "\n".join(
+                (
+                    f"📊 <b>EOD anomalies — {html.escape(as_of or 'date inconnue')}</b>",
+                    f"{count} {noun} sur {total_analyzed} symboles analysés.",
+                    "Un « survivant » = un ticker dont l'anomalie est NEUVE aujourd'hui.",
+                )
+            )
+        )
+        for index, alert in enumerate(ordered, start=1):
+            sections.append(
+                _survivor_block(index, alert, signals.get(alert.candidate.ticker))
+            )
+    if tension_block:
+        sections.append(tension_block)
+    if ordered:
+        sections.append(_HYSTERESIS_BLOCK)
+    return f"\n{_DIGEST_SEP}\n".join(sections)
 
 
 def split_telegram_html(text: str, limit: int = 4000) -> list[str]:
@@ -338,7 +561,7 @@ def run_eod_anomaly_pipeline(
     analyzer: AlertAnalyzer = _default_analyzer,
     macro_builder: MacroBuilder | None = None,
     dry_run: bool = False,
-    skip_warren: bool = False,
+    skip_warren: bool = True,
     journal_path: Path | None = None,
     alert_config: AlertThresholdConfig | None = None,
     tension_journal_path: Path | None = None,
@@ -348,21 +571,15 @@ def run_eod_anomaly_pipeline(
     """Run S0-S7 once in the Sprint 8 deployment order.
 
     ``dry_run`` (or the ``ANOMALY_DEDUP_READONLY`` env var) forwards read-only
-    mode to S5 so the dedup state file is never mutated. ``skip_warren`` bypasses
-    the S6/S7 macro+Warren stage for fast, LLM-free survivor checks.
-
-    ``skip_warren`` requires read-only mode: committing dedup state while
-    suppressing the digest would latch survivors as "alerted" without ever
-    sending anything — the exact incident class this epic prevents. Raises
-    ``ValueError`` on that unsafe combination before any fetch runs.
+    mode to S5 so the dedup state file is never mutated. ``skip_warren`` (the
+    default since Epic 6 Sprint 3) skips the S6/S7 macro+Warren stage and renders
+    the digest deterministically from the survivors' signals + dedup state — zero
+    LLM. It no longer requires read-only mode: an official run now commits dedup
+    state *and* emits a real (deterministic) digest, so survivors are never
+    latched without an alert being sent. Set ``skip_warren=False`` to opt into the
+    legacy Warren prose (removed entirely in Sprint 4).
     """
     effective_dry_run = dry_run or dedup_readonly_env()
-    if skip_warren and not effective_dry_run:
-        raise ValueError(
-            "skip_warren requires dry-run mode (--dry-run or "
-            "ANOMALY_DEDUP_READONLY=1): skipping Warren while committing dedup "
-            "state would latch survivors without sending any alert."
-        )
     ticker_registry = registry or load_registry()
     expected_symbols = _portfolio_symbols(ticker_registry)
     frames = frame_fetcher(history_days)
@@ -407,26 +624,13 @@ def run_eod_anomaly_pipeline(
     )
     candidates_detail = _build_candidates_detail(decisions, survivors, suppressions)
 
-    if skip_warren:
-        analyses: tuple[WarrenAlertAnalysis, ...] = ()
-    else:
-        macro_cache = MacroSnapshotCache()
-        _build_macro_once(macro_cache, frames, ticker_registry, macro_builder)
-        enriched = _attach_cached_macro(
-            survivors,
-            frames,
-            macro_cache,
-            ticker_registry,
-            macro_builder,
-        )
-        analyses = analyzer(enriched)
-    digest = format_digest(analyses, as_of=as_of)
-
     # Layer C — tension: journal every ticker-day (feeds outcome measurement),
-    # append an alert block on new episodes. Deterministic, no LLM, and off the
+    # render an alert block on new episodes. Deterministic, no LLM, and off the
     # critical path: a failure never blocks the anomaly pipeline. Watchlist
     # tickers (tension tier) are scanned too: OHLCV only, no registry entry,
-    # no classification, no beta gate.
+    # no classification, no beta gate. Computed before the digest so the
+    # deterministic renderer can slot the block in its template position.
+    tension_block = ""
     if tension_journal_path is not None:
         try:
             tension_frames = dict(portfolio_frames)
@@ -438,10 +642,32 @@ def run_eod_anomaly_pipeline(
                 tension, tension_journal_path, dry_run=effective_dry_run
             )
             tension_block = format_tension_digest(tension, as_of=as_of)
-            if tension_block:
-                digest = f"{digest}\n\n{tension_block}" if digest else tension_block
         except Exception as exc:  # pragma: no cover - defensive guard
             logger.error("tension layer failed (non-blocking): %s", exc)
+
+    if skip_warren:
+        analyses: tuple[WarrenAlertAnalysis, ...] = ()
+        digest = format_digest(
+            survivors,
+            signals,
+            as_of=as_of,
+            total_analyzed=len(decisions),
+            tension_block=tension_block,
+        )
+    else:
+        macro_cache = MacroSnapshotCache()
+        _build_macro_once(macro_cache, frames, ticker_registry, macro_builder)
+        enriched = _attach_cached_macro(
+            survivors,
+            frames,
+            macro_cache,
+            ticker_registry,
+            macro_builder,
+        )
+        analyses = analyzer(enriched)
+        digest = _format_warren_digest(analyses, as_of=as_of)
+        if tension_block:
+            digest = f"{digest}\n\n{tension_block}" if digest else tension_block
 
     issues = list(_missing_frame_issues(frames, ticker_registry))
     for decision in decisions.values():
@@ -460,7 +686,11 @@ def run_eod_anomaly_pipeline(
         candidate_count=sum(1 for decision in decisions.values() if decision.is_candidate),
         survivor_count=len(survivors),
         analysis_count=len(analyses),
-        should_send=bool(digest),
+        # A dry-run / read-only run (deploy validation) must never send Telegram,
+        # even though the deterministic digest is now non-empty on survivor days.
+        # Pre-S3 this held implicitly (skip_warren emitted an empty digest); make
+        # it explicit so a deploy on an anomaly day cannot fire a spurious alert.
+        should_send=bool(digest) and not effective_dry_run,
         digest=digest,
         data_issues=tuple(dict.fromkeys(issues)),
         dry_run=effective_dry_run,
@@ -498,10 +728,14 @@ def _parse_args() -> argparse.Namespace:
         help="Run the full pipeline without persisting dedup state.",
     )
     parser.add_argument(
-        "--skip-warren",
+        "--with-warren",
         action="store_true",
-        help="Skip the S6/S7 macro+Warren stage (no LLM calls).",
+        help="Opt into the legacy S6/S7 Warren prose (removed in Sprint 4). The "
+        "deterministic, LLM-free digest is the default.",
     )
+    # Accepted but now a no-op: skipping Warren is the default. Kept so the
+    # deployed n8n command (`--dry-run --skip-warren`) keeps parsing.
+    parser.add_argument("--skip-warren", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
@@ -530,7 +764,7 @@ def main() -> None:
     result = run_eod_anomaly_pipeline(
         history_days=args.history_days,
         dry_run=args.dry_run,
-        skip_warren=args.skip_warren,
+        skip_warren=not args.with_warren,
         journal_path=_RUNS_LOG_PATH,
         tension_journal_path=_TENSION_LOG_PATH,
         watchlist_symbols=_load_watchlist_symbols(),

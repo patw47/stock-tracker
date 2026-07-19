@@ -347,7 +347,7 @@ def test_no_flag_no_env_is_not_dry_run(monkeypatch) -> None:
     assert json.loads(json.dumps(result.to_dict()))["dry_run"] is False
 
 
-def test_skip_warren_computes_survivors_without_analyzer(monkeypatch) -> None:
+def test_skip_warren_builds_deterministic_digest_without_analyzer(monkeypatch) -> None:
     monkeypatch.delenv("ANOMALY_DEDUP_READONLY", raising=False)
     analyzer_calls: list[int] = []
 
@@ -367,29 +367,40 @@ def test_skip_warren_computes_survivors_without_analyzer(monkeypatch) -> None:
 
     assert result.survivor_count == 1
     assert result.analysis_count == 0
+    # Dry-run builds the deterministic digest (for validation) but never sends it —
+    # a deploy on an anomaly day must not fire a spurious Telegram.
     assert result.should_send is False
-    assert result.digest == ""
+    assert "point sur AAA" in result.digest
+    assert "Le filtre d'hystérésis" in result.digest
     assert result.dry_run is True
     assert analyzer_calls == []
 
 
-def test_skip_warren_without_dry_run_is_rejected(monkeypatch) -> None:
+def test_skip_warren_without_dry_run_is_allowed(monkeypatch) -> None:
     monkeypatch.delenv("ANOMALY_DEDUP_READONLY", raising=False)
-    fetched: list[int] = []
+    analyzer_calls: list[int] = []
 
-    def guard_fetcher(days):
-        fetched.append(days)
-        return _frames(("AAA",))
+    def analyzer(enriched_alerts):
+        analyzer_calls.append(1)
+        return ()
 
-    with pytest.raises(ValueError, match="skip_warren requires dry-run"):
-        _minimal_pipeline(
-            monkeypatch,
-            frame_fetcher=guard_fetcher,
-            skip_warren=True,
-        )
+    # skip_warren no longer requires read-only mode: an official run commits dedup
+    # state AND emits a deterministic digest, so survivors are never latched
+    # silently. The stub deduplicator returns survivors without writing state.
+    result = _minimal_pipeline(
+        monkeypatch,
+        deduplicator=lambda decisions, short_interest, *, readonly=False, **_kwargs: (
+            _survivor("AAA"),
+        ),
+        analyzer=analyzer,
+        skip_warren=True,
+    )
 
-    # Fail-fast: the guard must trip before any data fetch runs.
-    assert fetched == []
+    assert result.dry_run is False
+    assert result.analysis_count == 0
+    assert analyzer_calls == []
+    assert result.should_send is True
+    assert "point sur AAA" in result.digest
 
 
 def test_skip_warren_allowed_when_env_readonly(monkeypatch) -> None:
@@ -580,6 +591,7 @@ def test_pipeline_orders_s0_to_s7_and_calls_warren_only_for_survivors(
         deduplicator=dedup,
         macro_builder=macro_builder,
         analyzer=analyzer,
+        skip_warren=False,
     )
 
     assert calls == ["s1", "s2", "s3", "s4", "s5", "s6", "s7"]
@@ -621,6 +633,7 @@ def test_no_survivor_run_builds_macro_once_but_sends_no_digest(monkeypatch) -> N
         deduplicator=lambda decisions, short_interest, *, readonly=False, **_kwargs: (),
         macro_builder=macro_builder,
         analyzer=analyzer,
+        skip_warren=False,
     )
 
     assert macro_calls == 1
@@ -670,6 +683,7 @@ def test_macro_snapshot_is_reused_for_multiple_survivors(monkeypatch) -> None:
         ),
         macro_builder=macro_builder,
         analyzer=analyzer,
+        skip_warren=False,
     )
 
     assert macro_calls == 1
@@ -713,7 +727,7 @@ def test_missing_and_empty_ticker_frames_are_surfaced(monkeypatch) -> None:
 
 
 def test_format_digest_returns_one_digest_for_all_analyses() -> None:
-    digest = orchestrator.format_digest(
+    digest = orchestrator._format_warren_digest(
         (
             WarrenAlertAnalysis("AAA", "prompt", "AAA analysis", None),  # type: ignore[arg-type]
             WarrenAlertAnalysis("BBB", "prompt", "BBB analysis", None),  # type: ignore[arg-type]
@@ -735,7 +749,7 @@ def test_format_digest_escapes_html_and_keeps_bold_balanced() -> None:
         ),
         WarrenAlertAnalysis("C&D", "prompt", "plain prose", None),  # type: ignore[arg-type]
     )
-    digest = orchestrator.format_digest(analyses, as_of="2026-06-02")
+    digest = orchestrator._format_warren_digest(analyses, as_of="2026-06-02")
 
     # Special chars from prose/ticker are HTML-escaped.
     assert "&lt;" in digest and "&gt;" in digest and "&amp;" in digest
@@ -747,7 +761,7 @@ def test_format_digest_escapes_html_and_keeps_bold_balanced() -> None:
 
 
 def test_format_digest_has_no_markdown_heading() -> None:
-    digest = orchestrator.format_digest(
+    digest = orchestrator._format_warren_digest(
         (WarrenAlertAnalysis("AAA", "prompt", "AAA analysis", None),),  # type: ignore[arg-type]
         as_of="2026-06-02",
     )
@@ -759,7 +773,7 @@ def test_split_telegram_html_keeps_bold_balanced_across_chunks() -> None:
         WarrenAlertAnalysis(f"T{i}", "prompt", "prose " * 20, None)  # type: ignore[arg-type]
         for i in range(60)
     )
-    digest = orchestrator.format_digest(analyses, as_of="2026-06-02")
+    digest = orchestrator._format_warren_digest(analyses, as_of="2026-06-02")
     assert len(digest) > 4000
 
     chunks = orchestrator.split_telegram_html(digest, limit=4000)
