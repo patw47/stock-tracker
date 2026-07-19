@@ -1,65 +1,12 @@
-# Stock Tracker — Market Context Brief & Anomaly Alerts
+# Stock Tracker — Anomaly Alerts
 
-Automated stock monitoring system built with **n8n** + **Claude Haiku** + **Warren** (OpenClaw agent) + a **Python anomaly-detection layer** (`market_intelligence/`).
+Automated stock monitoring system built with **n8n** + **Warren** (OpenClaw agent) + a **Python anomaly-detection layer** (`market_intelligence/`).
 
-Two independent layers, one Telegram channel:
+Deterministic EOD anomaly detection, one Telegram channel:
 
 | Layer | What | When | LLM? |
 |---|---|---|---|
-| **Macro Brief** | Daily market context brief — Fed, rates, dollar, oil, VIX, small caps, sectors, geopolitics | 16:00 Paris, Mon–Fri | Haiku (web search) + Warren (prose) |
 | **B — Anomaly detection (EOD)** | Price/volume anomaly scan → beta gate → dedup → targeted Warren explanation | 21:30 UTC, Mon–Fri (after US close) | **Zero LLM in the detection path** — Warren only called for surviving alerts |
-
-The Macro Brief answers *"what is the market doing today?"*. Layer B answers *"when"* (something unusual just happened on this stock).
-
----
-
-## Macro Brief — Daily Market Context
-
-```
-Macro Brief Schedule 16h Mon-Fri (Europe/Paris)
-         │
-         ▼
-  Call Warren Macro Brief — POST /macro-brief
-  (warren_server.py — handle_macro_brief)
-         │
-         ├─ FRED API (get_snapshot)
-         │   Fed Funds, 10Y/2Y rates, VIX, dollar index, S&P 500
-         │
-         ├─ yfinance (get_market_closes)
-         │   IWM close + daily change, WTI crude close + daily change
-         │
-         ├─ Haiku web_search (fetch_macro_snapshot)
-         │   Fed stance, rate expectations/rumors, geopolitics,
-         │   notable IPOs, hot sectors, Fear & Greed, market rumors
-         │
-         ├─ sector_rotation.py (get_sector_rotation) — zero LLM
-         │   Sector ETF relative performance, IWM/SPY ratio,
-         │   small caps appetite trend
-         │
-         └─ fear_greed.py (get_fear_greed) — zero LLM
-             CNN Fear & Greed index (best-effort)
-         │
-         ▼
-  Warren — prose brief 150–300 words
-  Signal-first: opens with dominant regime (risk-on / risk-off / neutral)
-  Max 5 numeric values — Fed, rates, VIX, IWM move, Fear & Greed
-  No bullet points, no tables, no # headings, no bold headers
-  Rumors always labeled as rumors
-  Closes with one-sentence regime conclusion
-         │
-         ▼
-  Extract Macro Brief
-         │
-         ▼
-  Aggregate for Telegram → Split for Telegram → Send Telegram
-```
-
-**Graceful degradation** — if one source fails, the brief continues with the remaining data:
-- Web search fails → quantitative FRED data only, brief mentions qualitative uncertainty
-- All FRED sources fail → fallback values + warning
-- Brief is never empty, never crashes
-
-**Estimated cost**: ~$0.02/day (Haiku macro web search + Warren brief call)
 
 ---
 
@@ -310,14 +257,12 @@ Never hand-edit `portfolio.json` / `watchlist.json` — the flow goes through `a
 
 ## Features
 
-- **Macro Brief** — daily market regime brief sent at 16h Paris even with no ticker news
-- **Independent layers** — Macro Brief + EOD anomaly trigger (B), one Telegram channel
+- **EOD anomaly trigger (B)** — deterministic detection, one Telegram channel
 - **Zero LLM in the detection path** — Layer B is pure Python/statistics until an alert survives
 - **Ticker news memory** — Warren's anomaly research includes the ticker's news memory (`memory/tickers/`)
 - **Sector rotation signal** — `sector_rotation.py` computes sector ETF relative performance + IWM/SPY ratio (zero LLM)
 - **Fear & Greed** — `fear_greed.py` fetches CNN Fear & Greed index (best-effort, zero LLM)
 - **On-demand ticker brief** — `tickerbrief` skill via Telegram: full ticker context without triggering a digest
-- **Signal-first briefing** — dominant market regime on the first line of the macro brief
 - **Tickers as data** — `portfolio.json` / `watchlist.json` are the source of truth, editable via Telegram (`modifyportfolio` / `modifywatchlist` skills)
 - **Symbol integrity** — registry + quarantine (`market_intelligence/data/`) so analysis never runs on a wrong ticker
 - **Auto-split Telegram** — messages split at 4,000 characters at paragraph boundaries, HTML-safe
@@ -337,7 +282,7 @@ Never hand-edit `portfolio.json` / `watchlist.json` — the flow goes through `a
 | **n8n** (self-hosted) | Scheduling, API calls, credential management, delivery |
 | **Claude Haiku** (`claude-haiku-4-5-20251001`) | Per-ticker raw news search via `web_search` + macro web search |
 | **OpenClaw** | Agent framework wrapping Claude for Warren |
-| **Warren** (OpenClaw agent) | Intelligence layer — filtering, memory, Macro Brief prose, alert explanations |
+| **Warren** (OpenClaw agent) | Intelligence layer — filtering, memory, alert explanations |
 | **warren_server.py** | Python HTTP bridge between n8n and OpenClaw CLI (port 18795) |
 | **agents/warren/** | Prompt builder (persona, output format) + macro providers (FRED, web search, market closes) |
 | **market_intelligence/** | Layer B — EOD fetch, anomaly signals, beta gate, dedup, EDGAR, short interest, orchestrator |

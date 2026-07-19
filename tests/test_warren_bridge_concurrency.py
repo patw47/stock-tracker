@@ -132,12 +132,13 @@ def test_send_telegram_nodes_have_retry_and_stay_failing():
 # --------------------------------------------------------------------------
 # Bridge HTTP nodes carry explicit timeouts >= 240 s
 # --------------------------------------------------------------------------
-def test_bridge_http_nodes_have_explicit_timeout():
+def test_no_bridge_http_nodes_remain():
+    """Layer A (S1) + Macro Brief (S2) removed: n8n no longer calls the Warren HTTP bridge."""
     workflow = _workflow()
-    nodes = _nodes_by_name(workflow)
 
-    for name in ("Call Warren Macro Brief",):
-        node = nodes[name]
-        timeout = node["parameters"].get("options", {}).get("timeout")
-        assert timeout is not None, f"{name} has no explicit timeout"
-        assert timeout >= 240000, f"{name} timeout {timeout}ms < 240000ms"
+    http_nodes = [
+        node["name"]
+        for node in workflow["nodes"]
+        if node["type"] == "n8n-nodes-base.httpRequest"
+    ]
+    assert http_nodes == [], f"unexpected HTTP bridge nodes remain: {http_nodes}"

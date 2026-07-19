@@ -275,70 +275,6 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 14 * * 1-5"
-            }
-          ]
-        }
-      },
-      "id": "node-macro-brief-schedule",
-      "name": "Macro Brief Schedule 14:00 UTC Mon-Fri",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
-      "position": [
-        240,
-        520
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://127.0.0.1:18795/macro-brief",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={}",
-        "options": {
-          "timeout": 240000
-        }
-      },
-      "id": "node-call-macro-brief",
-      "name": "Call Warren Macro Brief",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "continueOnFail": true,
-      "position": [
-        520,
-        520
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $input.first().json;\nlet warrenText = '';\nif (typeof data.brief === 'string') {\n  warrenText = data.brief.trim();\n} else if (data.error) {\n  warrenText = 'Erreur brief macro : ' + data.error;\n}\nif (!warrenText) {\n  warrenText = 'Brief macro indisponible.';\n}\nreturn [{ json: { warrenText } }];",
-        "mode": "runOnceForAllItems"
-      },
-      "id": "node-extract-macro-brief",
-      "name": "Extract Macro Brief",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        800,
-        520
-      ]
-    },
-    {
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "cronExpression",
               "expression": "50 21 * * 5"
             }
           ]
@@ -555,28 +491,6 @@
         ]
       ]
     },
-    "Call Warren Macro Brief": {
-      "main": [
-        [
-          {
-            "node": "Extract Macro Brief",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Extract Macro Brief": {
-      "main": [
-        [
-          {
-            "node": "Aggregate for Telegram",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Run EOD Pipeline (deploy dry-run)": {
       "main": [
         [
@@ -693,17 +607,6 @@
         [
           {
             "node": "Aggregate for Telegram",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Macro Brief Schedule 14:00 UTC Mon-Fri": {
-      "main": [
-        [
-          {
-            "node": "Call Warren Macro Brief",
             "type": "main",
             "index": 0
           }
