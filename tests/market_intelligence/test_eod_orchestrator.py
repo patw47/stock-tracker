@@ -367,8 +367,9 @@ def test_skip_warren_builds_deterministic_digest_without_analyzer(monkeypatch) -
 
     assert result.survivor_count == 1
     assert result.analysis_count == 0
-    # Deterministic digest is now built (and sent) with no Warren call.
-    assert result.should_send is True
+    # Dry-run builds the deterministic digest (for validation) but never sends it —
+    # a deploy on an anomaly day must not fire a spurious Telegram.
+    assert result.should_send is False
     assert "point sur AAA" in result.digest
     assert "Le filtre d'hystérésis" in result.digest
     assert result.dry_run is True

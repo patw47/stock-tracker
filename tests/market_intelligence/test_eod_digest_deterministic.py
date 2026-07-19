@@ -220,7 +220,10 @@ def test_default_eod_path_never_calls_warren(monkeypatch) -> None:
     )
 
     assert result.analysis_count == 0
-    assert result.should_send is True
+    # Dry-run here (to avoid state writes): digest is built with zero LLM but not
+    # sent. The prod send path (dry_run=False → should_send=True) is covered by
+    # test_skip_warren_without_dry_run_is_allowed.
+    assert result.should_send is False
     assert "📊 <b>EOD anomalies — 2026-07-17</b>" in result.digest
     assert "point sur BBAI" in result.digest and "point sur HIMS" in result.digest
     assert "Le filtre d'hystérésis" in result.digest

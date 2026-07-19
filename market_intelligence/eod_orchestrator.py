@@ -686,7 +686,11 @@ def run_eod_anomaly_pipeline(
         candidate_count=sum(1 for decision in decisions.values() if decision.is_candidate),
         survivor_count=len(survivors),
         analysis_count=len(analyses),
-        should_send=bool(digest),
+        # A dry-run / read-only run (deploy validation) must never send Telegram,
+        # even though the deterministic digest is now non-empty on survivor days.
+        # Pre-S3 this held implicitly (skip_warren emitted an empty digest); make
+        # it explicit so a deploy on an anomaly day cannot fire a spurious alert.
+        should_send=bool(digest) and not effective_dry_run,
         digest=digest,
         data_issues=tuple(dict.fromkeys(issues)),
         dry_run=effective_dry_run,
