@@ -87,6 +87,7 @@ def test_first_candidate_fires_and_persists_latched_state(tmp_path: Path) -> Non
 
     assert len(alerts) == 1
     assert alerts[0].fire_reason == "initial"
+    assert alerts[0].prev_trigger_z_resid is None
     assert state.latched is True
     assert state.direction == "up"
     assert state.trigger_z_resid == pytest.approx(2.5)
@@ -198,6 +199,9 @@ def test_overrides_fire_and_update_latch(
 
     assert len(alerts) == 1
     assert alerts[0].fire_reason == reason
+    # On an escalation the previous trigger level (the initial 2.5) is carried so
+    # the digest can say "il avait déclenché à …"; None for every other reason.
+    assert alerts[0].prev_trigger_z_resid == (2.5 if reason == "escalation" else None)
     assert state.last_alert_as_of == "2026-06-02"
     assert state.latch_observations == (
         1 if reason == "direction_reversal" else 2
