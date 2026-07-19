@@ -34,53 +34,47 @@ def _reachable(workflow: dict, source: str) -> set[str]:
     return seen
 
 
-def test_legacy_warren_news_layer_remains_connected() -> None:
-    workflow = _workflow()
+LAYER_A_NODES = [
+    "Layer A News Schedule 14:00 UTC Mon-Fri",
+    "Read Tickers",
+    "Prepare Haiku Request",
+    "Claude Haiku API",
+    "Extract Raw News",
+    "Aggregate All News",
+    "Call Warren Filter",
+    "Extract Filter Result",
+    "If New Items",
+    "Call Memorize",
+]
 
-    assert _edge_targets(workflow, "Layer A News Schedule 14:00 UTC Mon-Fri") == [
-        "Read Tickers"
-    ]
-    assert _edge_targets(workflow, "Read Tickers") == ["Prepare Haiku Request"]
-    assert _edge_targets(workflow, "Claude Haiku API") == ["Extract Raw News"]
-    assert _edge_targets(workflow, "Call Warren Filter") == ["Extract Filter Result"]
-    assert _edge_targets(workflow, "If New Items", output_index=0) == ["Call Memorize"]
-    assert _edge_targets(workflow, "If New Items", output_index=1) == []
-    assert _edge_targets(workflow, "Split for Telegram") == ["Send Telegram"]
+
+def test_layer_a_nodes_fully_removed() -> None:
+    """Epic 6 S1: the whole Layer A news chain is gone from nodes and wiring."""
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+    connections = workflow["connections"]
+    serialized = json.dumps(connections)
+    for name in LAYER_A_NODES:
+        assert name not in nodes, f"{name} still present as a node"
+        assert name not in connections, f"{name} still a connection source"
+        assert name not in serialized, f"{name} still referenced as a target"
 
 
 def test_layer_a_synthesis_nodes_removed() -> None:
-    """Sprint 2: synthesis chain and Layer A → Telegram link must not exist."""
+    """Synthesis chain and the Layer A memorize node must not exist."""
     workflow = _workflow()
     nodes = _nodes_by_name(workflow)
 
     assert "Prepare Warren Synthesis" not in nodes
     assert "Call Warren Synthesis" not in nodes
     assert "Extract Warren Synthesis" not in nodes
-    assert "Call Memorize" in nodes
+    assert "Call Memorize" not in nodes
 
     connections = workflow["connections"]
     assert "Prepare Warren Synthesis" not in connections
     assert "Call Warren Synthesis" not in connections
     assert "Extract Warren Synthesis" not in connections
     assert "/synthesize" not in json.dumps(connections)
-
-
-def test_layer_a_does_not_reach_telegram() -> None:
-    """Layer A true branch (If New Items) must not reach Telegram nodes."""
-    workflow = _workflow()
-    layer_a_true_reachable = _reachable(workflow, "If New Items")
-    assert "Aggregate for Telegram" not in layer_a_true_reachable
-    assert "Split for Telegram" not in layer_a_true_reachable
-    assert "Send Telegram" not in layer_a_true_reachable
-
-
-def test_call_memorize_targets_correct_endpoint() -> None:
-    """Call Memorize node POSTs to /memorize."""
-    workflow = _workflow()
-    nodes = _nodes_by_name(workflow)
-    node = nodes["Call Memorize"]
-    assert node["type"] == "n8n-nodes-base.httpRequest"
-    assert "/memorize" in node["parameters"]["url"]
 
 
 def test_eod_branch_uses_registry_runner_and_reuses_telegram_nodes() -> None:
@@ -218,12 +212,12 @@ def test_eod_branch_has_no_llm_or_warren_before_survivor_gate() -> None:
         assert "/synthesize" not in payload
 
 
-def test_deploy_trigger_exercises_news_and_eod_branches() -> None:
+def test_deploy_trigger_exercises_eod_branch() -> None:
+    """Layer A removed: the deploy trigger now only exercises the EOD dry-run."""
     workflow = _workflow()
 
     assert _edge_targets(workflow, "Execute Trigger (deploy)") == [
-        "Read Tickers",
-        "Run EOD Pipeline (deploy dry-run)",
+        "Run EOD Pipeline (deploy dry-run)"
     ]
 
 
@@ -301,10 +295,7 @@ def test_schedule_labels_use_utc_not_16h() -> None:
     nodes = _nodes_by_name(workflow)
 
     assert all("16h" not in node["name"] for node in workflow["nodes"])
-    for name in (
-        "Layer A News Schedule 14:00 UTC Mon-Fri",
-        "Macro Brief Schedule 14:00 UTC Mon-Fri",
-    ):
+    for name in ("Macro Brief Schedule 14:00 UTC Mon-Fri",):
         assert name in nodes
         assert (
             nodes[name]["parameters"]["rule"]["interval"][0]["expression"]
