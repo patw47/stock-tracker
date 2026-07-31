@@ -116,7 +116,7 @@ def test_gated_candidate_measured_like_survivor(tmp_path):
                   close_fetcher=lambda: closes, today=TODAY)
 
     assert summary.measured == 2
-    tickers = {json.loads(l)["ticker"] for l in outcomes.read_text().splitlines()}
+    tickers = {json.loads(line)["ticker"] for line in outcomes.read_text().splitlines()}
     assert tickers == {"AAA", "BBB"}  # not_candidate exclu
 
 

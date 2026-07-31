@@ -359,7 +359,7 @@ def render_md(res: dict) -> str:
     L: list[str] = []
     A = L.append
 
-    A(f"# Layer B — signal quality (ablation)\n")
+    A("# Layer B — signal quality (ablation)\n")
     A(f"EOD anomaly detection, {res['window']['start']} → {res['window']['end']}, "
       f"{res['window']['trading_days']} trading days, {res['window']['tickers']} tickers "
       f"({res['window']['months']} months). Generated {res['generated']}.\n")
@@ -577,8 +577,6 @@ def _selfcheck() -> None:
     assert abs(c["tail_gt5"] - 5 / 30) < 1e-9
     assert c["median"] == 0.02
     # measure_event sign: a 'down' detection profits when price falls.
-    closes = pd.Series([100.0, 90.0, 90.0, 90.0, 90.0, 90.0],
-                       index=pd.to_datetime([f"2024-01-0{i}" for i in range(1, 7)]))
     ev = AlertEvent(ticker="X", as_of=date(2024, 1, 1), direction="down", outcome="bt")
     # not enough forward bars for J+20 -> None or unavailable; J+1 signing checked on a longer series.
     long_closes = pd.Series([100.0] + [90.0] * 25,

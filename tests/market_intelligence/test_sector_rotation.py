@@ -3,7 +3,6 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pandas as pd
-import pytest
 
 from market_intelligence.sector_rotation import (
     SectorRotationResult,

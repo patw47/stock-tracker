@@ -130,7 +130,20 @@ expires.
 Surviving alerts cost **zero LLM**. Each survivor is rendered with canned prose
 keyed by the dedup `fire_reason` (initial / escalation / new signal type /
 direction reversal) with the anomaly numbers slotted in, plus a squeeze-prone
-flag when relevant. The digest points the reader to Warren for a deeper look
+flag when relevant.
+
+Every line carries the ticker's **origin** — read from `portfolio.json` /
+`watchlist.json`, portfolio winning when a ticker is in both, `registre seul`
+when it is in the registry but in neither list (a referential inconsistency
+worth seeing). Fail-soft: an unreadable list drops the tags, never the run.
+
+```
+1. HIMS (💼 portefeuille) — baisse ↓   [escalade]
+2. BBAI (👀 watchlist) — hausse ↑   [première alerte]
+ASTS (registre seul): squeeze (bw pctl 8%)      ← ⚡ Layer C block
+```
+
+The digest points the reader to Warren for a deeper look
 **on demand** — « point sur TICKER » — which is when insider buying/selling
 (SEC EDGAR Form 4), product and sector news, halt (FINRA) and SSR (Nasdaq)
 status and the ticker's news memory are pulled together. Warren is allowed to

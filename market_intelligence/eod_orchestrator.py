@@ -236,6 +236,12 @@ _FIRE_LABEL: Final[dict[str, str]] = {
     "direction_reversal": "renversement",
 }
 
+# Ticker provenance (Epic 7 S1). Rendered as-is: these are module constants, never
+# file data — only the mapping *keys* come from portfolio.json / watchlist.json.
+PORTFOLIO_LABEL: Final[str] = "💼 portefeuille"
+WATCHLIST_LABEL: Final[str] = "👀 watchlist"
+REGISTRY_ONLY_LABEL: Final[str] = "registre seul"
+
 _SIGNAL_LABEL: Final[dict[str, str]] = {
     "rvol": "volume relatif",
     "volume_z": "volume anormalement élevé",
@@ -266,6 +272,41 @@ _HYSTERESIS_BLOCK: Final[str] = "\n".join(
         " • ré-armement — il retombe au calme (sous 1,0) puis re-franchit le seuil",
     )
 )
+
+
+def load_provenance_labels() -> dict[str, str] | None:
+    """Map each runtime ticker to its origin label, portfolio winning over watchlist.
+
+    Same fail-soft motif as ``_load_watchlist_symbols``: any read/parse failure
+    returns ``None``, which renders the digest without provenance tags instead of
+    breaking the run. Symbols absent from both lists fall back to
+    ``REGISTRY_ONLY_LABEL`` at lookup time (they are in the registry but in no
+    runtime list — a referential inconsistency worth showing).
+    """
+    from market_intelligence.registry_check import _resolve_runtime_path, load_runtime_symbols
+
+    try:
+        labels = {
+            symbol: WATCHLIST_LABEL
+            for symbol in load_runtime_symbols(_resolve_runtime_path("watchlist"))
+        }
+        labels.update(
+            {
+                symbol: PORTFOLIO_LABEL
+                for symbol in load_runtime_symbols(_resolve_runtime_path("portfolio"))
+            }
+        )
+        return labels
+    except Exception as exc:
+        logger.error("provenance labels skipped (runtime list unreadable): %s", exc)
+        return None
+
+
+def _provenance_tag(labels: Mapping[str, str] | None, ticker: str) -> str:
+    """Parenthesised origin tag to append after a ticker, empty when unavailable."""
+    if labels is None:
+        return ""
+    return f" ({labels.get(ticker, REGISTRY_ONLY_LABEL)})"
 
 
 def _fr(value: float, *, signed: bool = False, decimals: int = 1) -> str:
@@ -380,13 +421,17 @@ def _escalation_prose(ticker: str, alert: DeduplicatedAlert) -> str:
 
 
 def _survivor_block(
-    index: int, alert: DeduplicatedAlert, signal: AnomalySignals | None
+    index: int,
+    alert: DeduplicatedAlert,
+    signal: AnomalySignals | None,
+    provenance: Mapping[str, str] | None = None,
 ) -> str:
     candidate = alert.candidate
     ticker = html.escape(candidate.ticker)
     direction = _DIRECTION_WORD.get(candidate.direction or "", "")
     label = _FIRE_LABEL.get(alert.fire_reason, alert.fire_reason)
-    header = f"<b>{index}. {ticker} — {direction}   [{label}]</b>"
+    origin = _provenance_tag(provenance, candidate.ticker)
+    header = f"<b>{index}. {ticker}{origin} — {direction}   [{label}]</b>"
     if alert.fire_reason == "escalation":
         paragraph = _escalation_prose(ticker, alert)
     else:
@@ -405,6 +450,7 @@ def format_digest(
     as_of: str | None,
     total_analyzed: int,
     tension_block: str = "",
+    provenance: Mapping[str, str] | None = None,
 ) -> str:
     """Render survivors + tension into one deterministic Telegram digest (HTML).
 
@@ -414,6 +460,9 @@ def format_digest(
     the fixed hysteresis explainer) are joined by a dashed rule, reproducing the
     frozen Epic 6 template. Every value from tickers/dates is ``html.escape``d and
     each ``<b>`` tag stays on one line. Returns ``""`` when there is nothing to send.
+
+    ``provenance`` (Epic 7 S1) tags each ticker with its runtime-list origin;
+    ``None`` (unreadable list) renders the pre-Epic-7 digest untouched.
     """
     ordered = sorted(
         survivors, key=lambda a: abs(a.candidate.z_resid or 0.0), reverse=True
@@ -433,7 +482,9 @@ def format_digest(
         )
         for index, alert in enumerate(ordered, start=1):
             sections.append(
-                _survivor_block(index, alert, signals.get(alert.candidate.ticker))
+                _survivor_block(
+                    index, alert, signals.get(alert.candidate.ticker), provenance
+                )
             )
     if tension_block:
         sections.append(tension_block)
@@ -486,6 +537,7 @@ def run_eod_anomaly_pipeline(
     tension_journal_path: Path | None = None,
     watchlist_symbols: Sequence[str] | None = None,
     watchlist_fetcher: Callable[[list[str], int], dict[str, pd.DataFrame]] = fetch_symbols,
+    provenance: Mapping[str, str] | None = None,
 ) -> EodRunResult:
     """Run S0-S5 once in the Sprint 8 deployment order.
 
@@ -559,7 +611,9 @@ def run_eod_anomaly_pipeline(
             append_tension_journal(
                 tension, tension_journal_path, dry_run=effective_dry_run
             )
-            tension_block = format_tension_digest(tension, as_of=as_of)
+            tension_block = format_tension_digest(
+                tension, as_of=as_of, provenance=provenance
+            )
         except Exception as exc:  # pragma: no cover - defensive guard
             logger.error("tension layer failed (non-blocking): %s", exc)
 
@@ -572,6 +626,7 @@ def run_eod_anomaly_pipeline(
         as_of=as_of,
         total_analyzed=len(decisions),
         tension_block=tension_block,
+        provenance=provenance,
     )
 
     issues = list(_missing_frame_issues(frames, ticker_registry))
@@ -672,6 +727,7 @@ def main() -> None:
         journal_path=_RUNS_LOG_PATH,
         tension_journal_path=_TENSION_LOG_PATH,
         watchlist_symbols=_load_watchlist_symbols(),
+        provenance=load_provenance_labels(),
     )
     print(json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True))
 

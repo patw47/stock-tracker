@@ -5,6 +5,7 @@ import html
 import json
 import logging
 import math
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -179,13 +180,17 @@ def append_tension_journal(
 
 
 def format_tension_digest(
-    signals: dict[str, TensionSignal], *, as_of: str | None
+    signals: dict[str, TensionSignal],
+    *,
+    as_of: str | None,
+    provenance: Mapping[str, str] | None = None,
 ) -> str:
     """Telegram-ready HTML block for episode starts. Deterministic, no LLM.
 
     One line per new tension episode, empty string when none. Follows the
     anomaly digest HTML conventions (values escaped, each <b> tag within
-    one line).
+    one line). ``provenance`` (Epic 7 S1) maps a symbol to its runtime-list
+    origin label; ``None`` renders the pre-Epic-7 lines untouched.
     """
     starts = [s for s in signals.values() if s.tension and s.episode_start]
     if not starts:
@@ -206,5 +211,8 @@ def format_tension_digest(
             else ""
         )
         detail = html.escape("; ".join(parts) + expected)
-        lines.append(f"<b>{html.escape(s.symbol)}</b>: {detail}")
+        origin = (
+            "" if provenance is None else f" ({provenance.get(s.symbol, 'registre seul')})"
+        )
+        lines.append(f"<b>{html.escape(s.symbol)}</b>{origin}: {detail}")
     return "\n".join(lines)

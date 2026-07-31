@@ -70,7 +70,6 @@ class TestCalculateTension:
         assert signal.tension and not signal.episode_start
         # tension today only (spike started today: only last 3 days elevated
         # is not enough; make yesterday's rvol5 below threshold)
-        volumes2 = [1e6] * 95 + [1e6, 1e6, 1e6, 5e6, 5e6][:5]
         signal2 = calculate_tension("TST", _frame([100.0] * 100, [1e6] * 95 + [1e6, 1e6, 1e6, 5e6, 5e6]))
         if signal2.tension:  # rvol5 = (3*1 + 2*5)/5 = 2.6 today, 1.8 yesterday
             assert signal2.episode_start
@@ -140,7 +139,7 @@ class TestWatchlistTier:
                 s: _frame(closes, [1e6] * len(closes)) for s in syms
             },
         )
-        records = [json.loads(l) for l in journal.read_text().splitlines()]
+        records = [json.loads(line) for line in journal.read_text().splitlines()]
         by_symbol = {r["symbol"]: r for r in records}
         assert "WLTEST" in by_symbol            # watchlist journalisée
         assert set(symbols) <= set(by_symbol)   # portefeuille toujours couvert

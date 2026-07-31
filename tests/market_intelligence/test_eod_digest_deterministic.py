@@ -9,6 +9,8 @@ path never calls Warren.
 
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
 import market_intelligence.eod_orchestrator as orchestrator
@@ -75,13 +77,15 @@ def _signal_map() -> dict[str, AnomalySignals]:
     }
 
 
-def _tension_block() -> str:
+def _tension_block(provenance: dict[str, str] | None = None) -> str:
     asts = TensionSignal(
         symbol="ASTS", as_of="2026-07-17", bar_count=280, bw_pctl=0.08, rvol5=1.6,
         cum5=0.072, expected_move_20d=0.14, squeeze=True, quiet_accumulation=True,
         tension=True, episode_start=True, data_issues=(),
     )
-    return format_tension_digest({"ASTS": asts}, as_of="2026-07-17")
+    return format_tension_digest(
+        {"ASTS": asts}, as_of="2026-07-17", provenance=provenance
+    )
 
 
 def test_format_digest_reproduces_the_frozen_template() -> None:
@@ -162,6 +166,76 @@ def test_format_digest_escapes_dynamic_ticker() -> None:
     assert "<" not in stripped and ">" not in stripped
 
 
+# ── Epic 7 S1 — ticker provenance (portfolio / watchlist / registry only) ───
+
+
+def _runtime_lists(tmp_path, monkeypatch, **lists: object) -> None:
+    """Point ``_resolve_runtime_path`` at tmp copies of portfolio/watchlist.json."""
+    from market_intelligence import registry_check
+
+    monkeypatch.setattr(registry_check, "REPO_ROOT", tmp_path)
+    for name, content in lists.items():
+        path = tmp_path / f"{name}.json"
+        if isinstance(content, str):
+            path.write_text(content, encoding="utf-8")
+        else:
+            payload = {"tickers": [{"symbol": s} for s in content]}  # type: ignore[union-attr]
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_load_provenance_labels_gives_portfolio_priority(tmp_path, monkeypatch) -> None:
+    """A ticker in both lists is a portfolio holding first (epic decision)."""
+    _runtime_lists(
+        tmp_path, monkeypatch, portfolio=["BBAI", "HIMS"], watchlist=["HIMS", "ASTS"]
+    )
+
+    assert orchestrator.load_provenance_labels() == {
+        "BBAI": "💼 portefeuille",
+        "HIMS": "💼 portefeuille",  # in both → portfolio wins
+        "ASTS": "👀 watchlist",
+    }
+
+
+def test_provenance_tags_survivor_headers_and_tension_lines() -> None:
+    """Golden: fixed input → exact header/tension text, one case per label."""
+    provenance = {"BBAI": "💼 portefeuille", "ASTS": "👀 watchlist"}
+    digest = format_digest(
+        [_bbai(), _hims()],
+        _signal_map(),
+        as_of="2026-07-17",
+        total_analyzed=181,
+        tension_block=_tension_block(provenance),
+        provenance=provenance,
+    )
+
+    assert "<b>1. HIMS (registre seul) — baisse ↓   [escalade]</b>" in digest
+    assert "<b>2. BBAI (💼 portefeuille) — hausse ↑   [première alerte]</b>" in digest
+    assert (
+        "<b>ASTS</b> (👀 watchlist): squeeze (bw pctl 8%); accumulation calme "
+        "(rvol5 1.6, 5j +7.2%) — move attendu 20j ±14%" in digest
+    )
+
+
+def test_unreadable_runtime_list_leaves_the_digest_untouched(tmp_path, monkeypatch) -> None:
+    """Fail-soft: a corrupt list drops the tags, it never breaks the run."""
+    _runtime_lists(tmp_path, monkeypatch, portfolio="{ not json", watchlist=["ASTS"])
+
+    assert orchestrator.load_provenance_labels() is None
+
+    without_tags = format_digest(
+        [_bbai(), _hims()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
+        tension_block=_tension_block(None), provenance=None,
+    )
+    pre_epic7 = format_digest(
+        [_bbai(), _hims()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
+        tension_block=_tension_block(),
+    )
+    assert without_tags == pre_epic7
+    assert "portefeuille" not in without_tags
+    assert "watchlist" not in without_tags
+    assert "registre seul" not in without_tags
+
+
 # ── Zero LLM in the default EOD path ────────────────────────────────────────
 
 
@@ -209,9 +283,11 @@ def test_default_eod_path_never_calls_warren(monkeypatch) -> None:
         short_interest_fetcher=lambda reg: {"BBAI": _short("BBAI"), "HIMS": _short("HIMS")},
         deduplicator=lambda decisions, short_interest, **kwargs: (_bbai(), _hims()),
         dry_run=True,
+        provenance={"BBAI": "💼 portefeuille"},
     )
 
     assert result.analysis_count == 0
+    assert "BBAI (💼 portefeuille)" in result.digest and "HIMS (registre seul)" in result.digest
     # Dry-run here (to avoid state writes): digest is built with zero LLM but not
     # sent. The prod send path (dry_run=False → should_send=True) is covered by
     # test_skip_warren_without_dry_run_is_allowed.

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Tests for the 'Read Tickers' n8n Code node logic.
 
@@ -19,6 +17,8 @@ the exact logic embedded in the workflow, not a Python reimplementation.
 7. Revert the edit.
 ---
 """
+
+from __future__ import annotations
 
 import json
 import os
