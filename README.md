@@ -26,7 +26,9 @@ Layer B EOD Schedule (21:30 UTC, Mon–Fri — DST-safe, always ≥ 30 min after
          │   Layer C tension scan (registry + watchlist tickers, no LLM)
          │      → tension.jsonl journal + ⚡ digest block on new episodes
          │   Deterministic digest (zero LLM) — canned per-survivor prose keyed by
-         │      the dedup fire_reason with the anomaly numbers slotted in; points
+         │      the dedup fire_reason with the anomaly numbers slotted in; each
+         │      line tagged with the ticker's origin (💼 portfolio / 👀 watchlist)
+         │      and opened on the raw close + intraday read + z gloss; points
          │      the reader to on-demand Warren (« point sur TICKER »)
          ▼
   JSON result { survivor_count, should_send, digest, data_issues,
