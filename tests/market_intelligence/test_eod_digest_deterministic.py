@@ -71,9 +71,12 @@ def _hims() -> DeduplicatedAlert:
 def _signal_map() -> dict[str, AnomalySignals]:
     return {
         "BBAI": _signals(
-            "BBAI", rvol=4.2, log_volume_z=3.1, opening_gap=0.064, atr_expansion_ratio=1.9
+            "BBAI", daily_return=0.072, rvol=4.2, log_volume_z=3.1, opening_gap=0.064,
+            atr_expansion_ratio=1.9,
         ),
-        "HIMS": _signals("HIMS", breakout_low_52w=True),
+        "HIMS": _signals(
+            "HIMS", daily_return=-0.098, opening_gap=0.022, breakout_low_52w=True
+        ),
     }
 
 
@@ -215,9 +218,75 @@ def test_provenance_tags_survivor_headers_and_tension_lines() -> None:
         "(rvol5 1.6, 5j +7.2%) — move attendu 20j ±14%" in digest
     )
 
+    # A watchlist ticker in a survivor *header* too (not only in a tension line).
+    watched = format_digest(
+        [_hims()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
+        provenance={"HIMS": "👀 watchlist"},
+    )
+    assert "<b>1. HIMS (👀 watchlist) — baisse ↓   [escalade]</b>" in watched
+
+
+# Exact digest for the fixtures above with ``provenance=None`` — the frozen anchor
+# of the untagged rendering (fail-soft path). Update only on a deliberate template
+# change, never to make a test pass.
+_UNTAGGED_DIGEST = """\
+📊 <b>EOD anomalies — 2026-07-17</b>
+2 survivants sur 181 symboles analysés.
+Un « survivant » = un ticker dont l'anomalie est NEUVE aujourd'hui.
+────────────────────────────
+<b>1. HIMS — baisse ↓   [escalade]</b>
+
+Escalade : HIMS était déjà verrouillé (il avait déclenché à −2,4), mais son \
+z-résiduel s'est aggravé jusqu'à −3,4, soit +1,0 au-delà du niveau qui l'avait \
+fait alerter. Concrètement : clôture −9,8 % aujourd'hui, alors que le titre avait \
+OUVERT en hausse (+2,2 %) — il s'est retourné en cours de journée — la situation \
+s'aggrave au lieu de se calmer. Il casse en plus son plus-bas 52 semaines.
+→ Pour l'analyse Warren : « point sur HIMS »
+────────────────────────────
+<b>2. BBAI — hausse ↑   [première alerte]</b>
+
+Première alerte : BBAI n'était pas encore « verrouillé » et vient de franchir son \
+seuil de déclenchement. Concrètement : clôture +7,2 % aujourd'hui, après une \
+ouverture déjà en hausse (gap +6,4 %). Mouvement porté par un volume relatif de \
+4,2× la normale et un volume anormalement élevé (z +3,1). Son z-résiduel atteint \
++2,8 (seuil 2,5) — le titre bouge nettement plus que son comportement habituel : \
+son mouvement propre, une fois retirée la part expliquée par le marché, fait \
+environ 3× sa journée typique. Gap d'ouverture +6,4 %, volatilité en expansion \
+(ATR ×1,9).
+⚠ Profil squeeze possible (short interest élevé).
+→ Pour l'analyse Warren : « point sur BBAI »
+────────────────────────────
+⚡ <b>Tension — Layer C (2026-07-17)</b>
+
+<b>ASTS</b>: squeeze (bw pctl 8%); accumulation calme (rvol5 1.6, 5j +7.2%) — \
+move attendu 20j ±14%
+   ↳ volatilité comprimée dans le pire décile de son année — un mouvement se \
+prépare, direction inconnue
+   ↳ volume anormal sans mouvement de prix — accumulation silencieuse possible
+────────────────────────────
+ℹ️ <b>Le filtre d'hystérésis — pourquoi si peu d'alertes ?</b>
+
+Un ticker n'alerte qu'UNE fois en franchissant son seuil (z-résiduel ~2,5). Il \
+est ensuite « verrouillé » et reste silencieux tant qu'il ne fait rien de neuf. \
+Il ne réapparaît que dans 4 cas :
+ • escalade — son z-résiduel s'aggrave d'au moins +1,0
+ • renversement — la direction s'inverse (hausse ↔ baisse)
+ • nouveau signal — un type de signal s'ajoute (volume, cassure 52 sem…)
+ • ré-armement — il retombe au calme (sous 1,0) puis re-franchit le seuil"""
+
+
+def test_provenance_falls_back_to_registry_only_in_tension_lines() -> None:
+    """A tension symbol in no runtime list is flagged ``registre seul``."""
+    assert "<b>ASTS</b> (registre seul):" in _tension_block({"BBAI": "💼 portefeuille"})
+
 
 def test_unreadable_runtime_list_leaves_the_digest_untouched(tmp_path, monkeypatch) -> None:
-    """Fail-soft: a corrupt list drops the tags, it never breaks the run."""
+    """Fail-soft: a corrupt list drops the tags, it never breaks the run.
+
+    Anchored on ``_UNTAGGED_DIGEST`` (the exact expected text, frozen here) rather
+    than on a second render of the same code, so a regression in the untagged
+    rendering actually fails.
+    """
     _runtime_lists(tmp_path, monkeypatch, portfolio="{ not json", watchlist=["ASTS"])
 
     assert orchestrator.load_provenance_labels() is None
@@ -226,14 +295,129 @@ def test_unreadable_runtime_list_leaves_the_digest_untouched(tmp_path, monkeypat
         [_bbai(), _hims()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
         tension_block=_tension_block(None), provenance=None,
     )
-    pre_epic7 = format_digest(
-        [_bbai(), _hims()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
-        tension_block=_tension_block(),
-    )
-    assert without_tags == pre_epic7
+    assert without_tags == _UNTAGGED_DIGEST
     assert "portefeuille" not in without_tags
     assert "watchlist" not in without_tags
     assert "registre seul" not in without_tags
+
+
+# ── Epic 7 S2 — explicit prose (raw close, intraday reading, z gloss) ───────
+
+
+def _concrete(**overrides: object) -> str:
+    """« Concrètement … » clause for one set of signals (no trailing dot)."""
+    return orchestrator._concrete_clause(_signals("XYZ", **overrides))
+
+
+def test_concrete_clause_same_signs_credits_the_open() -> None:
+    """Rule 1 — close and gap agree, |gap| >= 1 %: the move was there at the open."""
+    assert _concrete(daily_return=0.072, opening_gap=0.064) == (
+        "Concrètement : clôture +7,2 % aujourd'hui, après une ouverture déjà en "
+        "hausse (gap +6,4 %)"
+    )
+
+
+def test_concrete_clause_flat_open_means_built_in_session() -> None:
+    """Rule 2 — |gap| < 1 %: nothing happened overnight."""
+    assert _concrete(daily_return=-0.055, opening_gap=-0.003) == (
+        "Concrètement : clôture −5,5 % aujourd'hui, après une ouverture quasi "
+        "inchangée (gap −0,3 %) — le mouvement s'est construit en séance, pas sur "
+        "une nouvelle nocturne"
+    )
+
+
+def test_concrete_clause_plain_reversal() -> None:
+    """Rule 3 without a 52w breakout: reversal, no "cassure ratée"."""
+    assert _concrete(daily_return=-0.098, opening_gap=0.022) == (
+        "Concrètement : clôture −9,8 % aujourd'hui, alors que le titre avait "
+        "OUVERT en hausse (+2,2 %) — il s'est retourné en cours de journée"
+    )
+
+
+def test_concrete_clause_failed_breakout_high() -> None:
+    """Epic reference rendering, verbatim: 52w high touched then sold off."""
+    assert _concrete(
+        daily_return=-0.098, opening_gap=0.022, breakout_high_52w=True
+    ) + "." == (
+        "Concrètement : clôture −9,8 % aujourd'hui, alors que le titre avait "
+        "OUVERT en hausse (+2,2 %) et touché un plus-haut de 52 semaines en séance "
+        "— il s'est retourné en cours de journée (cassure ratée : l'élan du matin "
+        "a été vendu)."
+    )
+
+
+def test_concrete_clause_failed_breakout_low() -> None:
+    """Mirror case: 52w low touched at a down open, closed up."""
+    assert _concrete(daily_return=0.081, opening_gap=-0.034, breakout_low_52w=True) == (
+        "Concrètement : clôture +8,1 % aujourd'hui, alors que le titre avait "
+        "OUVERT en baisse (−3,4 %) et touché un plus-bas de 52 semaines en séance "
+        "— il s'est retourné en cours de journée (cassure ratée : l'élan du matin "
+        "a été vendu)"
+    )
+
+
+def test_breakout_in_the_close_direction_is_not_a_failed_breakout() -> None:
+    """A 52w low with a down close is just a breakout — no reversal narrative."""
+    assert "cassure ratée" not in _concrete(
+        daily_return=-0.098, opening_gap=0.022, breakout_low_52w=True
+    )
+
+
+def test_concrete_sentence_omitted_without_daily_return() -> None:
+    """Fail-soft: no raw close computed → the sentence disappears, run intact."""
+    assert _concrete(opening_gap=0.064) == ""
+    digest = format_digest(
+        [_bbai()], {"BBAI": _signals("BBAI", rvol=4.2)},
+        as_of="2026-07-17", total_analyzed=181,
+    )
+    assert "Concrètement" not in digest
+    assert "un volume relatif de 4,2× la normale" in digest  # rest of the prose stands
+
+
+def test_escalation_prose_carries_the_worsening_clause() -> None:
+    """Escalation gets the same sentence plus the "s'aggrave" tail."""
+    digest = format_digest(
+        [_hims()], _signal_map(), as_of="2026-07-17", total_analyzed=181
+    )
+    assert (
+        "Concrètement : clôture −9,8 % aujourd'hui, alors que le titre avait OUVERT "
+        "en hausse (+2,2 %) — il s'est retourné en cours de journée — la situation "
+        "s'aggrave au lieu de se calmer." in digest
+    )
+
+
+def test_z_gloss_keeps_the_exact_figure_and_signs_the_direction() -> None:
+    """|z| rounded to an integer, "vers le bas" when negative — a complement only."""
+    up = format_digest(
+        [_bbai()], _signal_map(), as_of="2026-07-17", total_analyzed=181
+    )
+    assert "Son z-résiduel atteint +2,8 (seuil 2,5)" in up  # exact figure kept
+    assert (
+        "son mouvement propre, une fois retirée la part expliquée par le marché, "
+        "fait environ 3× sa journée typique." in up
+    )
+
+    falling = DeduplicatedAlert(
+        candidate=_candidate("XYZ", "down", -3.4, ("residual_z",)),
+        squeeze_prone=None, fire_reason="initial", signal_types=("residual_z",),
+    )
+    down = format_digest(
+        [falling], {"XYZ": _signals("XYZ")}, as_of="2026-07-17", total_analyzed=181
+    )
+    assert "fait environ 3× sa journée typique, vers le bas." in down
+
+
+def test_tension_glosses_translate_each_signal_type() -> None:
+    """SQUEEZE / QUIET each get their canned plain-language line."""
+    block = _tension_block()
+    assert (
+        "   ↳ volatilité comprimée dans le pire décile de son année — un mouvement "
+        "se prépare, direction inconnue" in block
+    )
+    assert (
+        "   ↳ volume anormal sans mouvement de prix — accumulation silencieuse "
+        "possible" in block
+    )
 
 
 # ── Zero LLM in the default EOD path ────────────────────────────────────────

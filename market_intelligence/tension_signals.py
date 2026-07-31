@@ -32,6 +32,15 @@ _VOL_BASE_WINDOW: Final[int] = 20
 _ATR_WINDOW: Final[int] = 14
 _REQUIRED: Final[tuple[str, ...]] = ("high", "low", "close", "volume")
 
+# Canned plain-language gloss per tension type (Epic 7 S2), one per rendered stat.
+_SQUEEZE_GLOSS: Final[str] = (
+    "volatilité comprimée dans le pire décile de son année — un mouvement se "
+    "prépare, direction inconnue"
+)
+_QUIET_GLOSS: Final[str] = (
+    "volume anormal sans mouvement de prix — accumulation silencieuse possible"
+)
+
 
 @dataclass(frozen=True)
 class TensionSignal:
@@ -199,12 +208,15 @@ def format_tension_digest(
     lines = [f"⚡ <b>Tension — Layer C ({date_label})</b>", ""]
     for s in sorted(starts, key=lambda x: x.symbol):
         parts: list[str] = []
+        glosses: list[str] = []
         if s.squeeze and s.bw_pctl is not None:
             parts.append(f"squeeze (bw pctl {100 * s.bw_pctl:.0f}%)")
+            glosses.append(_SQUEEZE_GLOSS)
         if s.quiet_accumulation and s.rvol5 is not None and s.cum5 is not None:
             parts.append(
                 f"accumulation calme (rvol5 {s.rvol5:.1f}, 5j {100 * s.cum5:+.1f}%)"
             )
+            glosses.append(_QUIET_GLOSS)
         expected = (
             f" — move attendu 20j ±{100 * s.expected_move_20d:.0f}%"
             if s.expected_move_20d is not None
@@ -212,7 +224,10 @@ def format_tension_digest(
         )
         detail = html.escape("; ".join(parts) + expected)
         origin = (
-            "" if provenance is None else f" ({provenance.get(s.symbol, 'registre seul')})"
+            ""
+            if provenance is None
+            else f" ({html.escape(provenance.get(s.symbol, 'registre seul'))})"
         )
         lines.append(f"<b>{html.escape(s.symbol)}</b>{origin}: {detail}")
+        lines.extend(f"   ↳ {gloss}" for gloss in glosses)
     return "\n".join(lines)

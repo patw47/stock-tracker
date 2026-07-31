@@ -137,10 +137,29 @@ Every line carries the ticker's **origin** — read from `portfolio.json` /
 when it is in the registry but in neither list (a referential inconsistency
 worth seeing). Fail-soft: an unreadable list drops the tags, never the run.
 
+Each survivor's prose opens on the day's **raw close**, then reads the session by
+three fixed rules on the opening gap (move already there at the open / built in
+session / intraday reversal, with a "cassure ratée" when a 52-week breakout was
+sold off). The z-residual keeps its exact figure and gains a plain-language
+gloss; each Layer C signal gets a canned one too. Still zero LLM: every sentence
+is a template triggered by an existing field.
+
 ```
 1. HIMS (💼 portefeuille) — baisse ↓   [escalade]
+Escalade : HIMS était déjà verrouillé (il avait déclenché à −2,4)…
+Concrètement : clôture −9,8 % aujourd'hui, alors que le titre avait OUVERT en
+hausse (+2,2 %) et touché un plus-haut de 52 semaines en séance — il s'est
+retourné en cours de journée (cassure ratée : l'élan du matin a été vendu).
+
 2. BBAI (👀 watchlist) — hausse ↑   [première alerte]
+Concrètement : clôture +7,2 % aujourd'hui, après une ouverture déjà en hausse
+(gap +6,4 %). … Son z-résiduel atteint +2,8 (seuil 2,5) — le titre bouge
+nettement plus que son comportement habituel : son mouvement propre, une fois
+retirée la part expliquée par le marché, fait environ 3× sa journée typique.
+
 ASTS (registre seul): squeeze (bw pctl 8%)      ← ⚡ Layer C block
+   ↳ volatilité comprimée dans le pire décile de son année — un mouvement se
+     prépare, direction inconnue
 ```
 
 The digest points the reader to Warren for a deeper look
