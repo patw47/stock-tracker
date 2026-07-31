@@ -259,6 +259,9 @@ _BREAKOUT_VERB: Final[dict[str, str]] = {
     "breakout_low_52w": "casse en plus son plus-bas 52 semaines",
 }
 
+# Below this |gap| the open is read as "quasi inchangée" (Epic 7 S2 rule 2).
+_GAP_FLAT: Final[float] = 0.01
+
 _HYSTERESIS_BLOCK: Final[str] = "\n".join(
     (
         "ℹ️ <b>Le filtre d'hystérésis — pourquoi si peu d'alertes ?</b>",
@@ -347,6 +350,59 @@ def _gap_atr_clause(signal_types: tuple[str, ...], signal: AnomalySignals | None
     return sentence[0].upper() + sentence[1:] + "."
 
 
+def _failed_breakout(signal: AnomalySignals, daily_return: float) -> str:
+    """Name the 52w extreme touched *against* the close, else "" (no failed breakout)."""
+    if signal.breakout_high_52w and daily_return < 0:
+        return "un plus-haut de 52 semaines"
+    if signal.breakout_low_52w and daily_return > 0:
+        return "un plus-bas de 52 semaines"
+    return ""
+
+
+def _intraday_clause(signal: AnomalySignals, daily_return: float) -> str:
+    """Read the day by three fixed rules on ``opening_gap`` vs the close's sign.
+
+    1. same sign, |gap| >= 1 % → the move was already there at the open;
+    2. |gap| < 1 %             → the move was built during the session;
+    3. opposite signs          → intraday reversal, plus "cassure ratée" when a
+       52-week breakout happened in the *opening* direction.
+    No gap → "" (fail-soft, the raw close still gets rendered).
+    """
+    gap = signal.opening_gap
+    if gap is None:
+        return ""
+    gap_text = f"{_fr(100 * gap, signed=True)} %"
+    if abs(gap) < _GAP_FLAT:
+        return (
+            f", après une ouverture quasi inchangée (gap {gap_text}) — le mouvement "
+            "s'est construit en séance, pas sur une nouvelle nocturne"
+        )
+    word = "hausse" if gap > 0 else "baisse"
+    if (gap > 0) == (daily_return >= 0):
+        return f", après une ouverture déjà en {word} (gap {gap_text})"
+    touched = _failed_breakout(signal, daily_return)
+    return (
+        f", alors que le titre avait OUVERT en {word} ({gap_text})"
+        + (f" et touché {touched} en séance" if touched else "")
+        + " — il s'est retourné en cours de journée"
+        + (" (cassure ratée : l'élan du matin a été vendu)" if touched else "")
+    )
+
+
+def _concrete_clause(signal: AnomalySignals | None) -> str:
+    """« Concrètement : … » — the day's raw close then its intraday reading, no dot.
+
+    Returns "" when ``daily_return`` is missing (the sentence is then omitted).
+    """
+    if signal is None or signal.daily_return is None:
+        return ""
+    close = f"{_fr(100 * signal.daily_return, signed=True)} %"
+    return (
+        f"Concrètement : clôture {close} aujourd'hui"
+        f"{_intraday_clause(signal, signal.daily_return)}"
+    )
+
+
 def _opening_sentence(ticker: str, alert: DeduplicatedAlert) -> str:
     if alert.fire_reason == "initial":
         return (
@@ -374,6 +430,9 @@ def _standard_prose(
     """Prose for initial / new_signal_type / direction_reversal (signals slotted in)."""
     candidate = alert.candidate
     sentences = [_opening_sentence(ticker, alert)]
+    concrete = _concrete_clause(signal)
+    if concrete:
+        sentences.append(concrete + ".")
     volume = _volume_clause(alert.signal_types, signal)
     if volume:
         sentences.append(volume)
@@ -383,9 +442,15 @@ def _standard_prose(
             if candidate.residual_threshold is not None
             else ""
         )
+        # The exact z and its threshold stay; the gloss is a complement, never a
+        # replacement (epic decision). N = |z| rounded half-up to the integer.
+        down = ", vers le bas" if candidate.z_resid < 0 else ""
         sentences.append(
             f"Son z-résiduel atteint {_fr(candidate.z_resid, signed=True)}{threshold} "
-            "— le titre bouge nettement plus que son comportement habituel."
+            "— le titre bouge nettement plus que son comportement habituel : son "
+            "mouvement propre, une fois retirée la part expliquée par le marché, "
+            f"fait environ {int(abs(candidate.z_resid) + 0.5)}× sa journée typique"
+            f"{down}."
         )
     tail = _gap_atr_clause(alert.signal_types, signal)
     if tail:
@@ -393,7 +458,9 @@ def _standard_prose(
     return " ".join(sentences)
 
 
-def _escalation_prose(ticker: str, alert: DeduplicatedAlert) -> str:
+def _escalation_prose(
+    ticker: str, alert: DeduplicatedAlert, signal: AnomalySignals | None
+) -> str:
     candidate = alert.candidate
     z_resid = candidate.z_resid
     prev = alert.prev_trigger_z_resid
@@ -410,6 +477,9 @@ def _escalation_prose(ticker: str, alert: DeduplicatedAlert) -> str:
         f"Escalade : {ticker} était déjà verrouillé (il avait déclenché à "
         f"{prev_text}), mais son z-résiduel s'est aggravé jusqu'à {z_text}{margin}."
     ]
+    concrete = _concrete_clause(signal)
+    if concrete:
+        sentences.append(f"{concrete} — la situation s'aggrave au lieu de se calmer.")
     verbs = [
         _BREAKOUT_VERB[b]
         for b in ("breakout_high_52w", "breakout_low_52w")
@@ -433,7 +503,7 @@ def _survivor_block(
     origin = _provenance_tag(provenance, candidate.ticker)
     header = f"<b>{index}. {ticker}{origin} — {direction}   [{label}]</b>"
     if alert.fire_reason == "escalation":
-        paragraph = _escalation_prose(ticker, alert)
+        paragraph = _escalation_prose(ticker, alert, signal)
     else:
         paragraph = _standard_prose(ticker, alert, signal)
     lines = [header, "", paragraph]
