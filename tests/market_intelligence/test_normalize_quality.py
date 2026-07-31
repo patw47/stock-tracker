@@ -4,7 +4,6 @@ import json
 from unittest.mock import patch
 
 import pandas as pd
-import pytest
 
 from market_intelligence.normalize_quality import normalize, run_normalization
 

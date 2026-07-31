@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import html
 import json
-import sys
 from collections import Counter
 from collections.abc import Iterable
 from datetime import date, datetime, timedelta, timezone

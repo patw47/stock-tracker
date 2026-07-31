@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from market_intelligence.registry_schema import QuarantineEntry, TickerEntry
 from market_intelligence.symbol_validator import validate_ticker, run_validation

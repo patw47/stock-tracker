@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 import requests
 
 from market_intelligence.fear_greed import FearGreedResult, get_fear_greed

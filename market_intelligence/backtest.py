@@ -36,7 +36,7 @@ from market_intelligence.dedup_hysteresis import (
 )
 from market_intelligence.eod_orchestrator import EodRunResult, run_eod_anomaly_pipeline
 from market_intelligence.fetch_eod import fetch_all
-from market_intelligence.registry_schema import Registry, load_registry
+from market_intelligence.registry_schema import Registry
 
 logger = logging.getLogger(__name__)
 
