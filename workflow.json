@@ -4,7 +4,7 @@
   "nodes": [
     {
       "parameters": {
-        "jsCode": "const warrenText = $input.first().json.warrenText;\nconst text = (warrenText && warrenText.trim())\n  ? warrenText.trim()\n  : \"Aucune actualité pertinente aujourd'hui. Bonne journée.\";\nreturn [{ json: { text } }];",
+        "jsCode": "const input = $input.first().json;\n// Le repli reste ici : c'est de la presentation, pas du decoupage.\nconst chunks = (input.warrenText && input.warrenText.trim())\n  ? input.chunks\n  : [\"Aucune actualité pertinente aujourd'hui. Bonne journée.\"];\nreturn [{ json: { chunks } }];\n",
         "mode": "runOnceForAllItems"
       },
       "id": "node-aggregate-telegram",
@@ -18,7 +18,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const text = $input.first().json.text || \"Aucune actualité pertinente aujourd'hui.\";\nconst MAX = 4000;\nfunction stripTags(s){ return s.replace(/<[^>]+>/g, ''); }\nif (text.length <= MAX) {\n  return [{ json: { chunk: text } }];\n}\nconst paragraphs = text.split(/\\n\\n+/);\nconst chunks = [];\nlet current = '';\nfor (const para of paragraphs) {\n  const candidate = current ? current + '\\n\\n' + para : para;\n  if (candidate.length <= MAX) { current = candidate; continue; }\n  if (current) { chunks.push(current); current = ''; }\n  if (para.length <= MAX) { current = para; }\n  else {\n    const plain = stripTags(para);\n    for (let i = 0; i < plain.length; i += MAX) chunks.push(plain.slice(i, i + MAX));\n  }\n}\nif (current) chunks.push(current);\nreturn chunks.map((chunk) => ({ json: { chunk } }));\n",
+        "jsCode": "// Relais pur (Epic 9 S4) : le decoupage Telegram est fait en Python\n// (market_intelligence/telegram_split.py), seule implementation testee.\nreturn ($input.first().json.chunks || []).map((chunk) => ({ json: { chunk } }));\n",
         "mode": "runOnceForAllItems"
       },
       "id": "node-split-telegram",
@@ -171,7 +171,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: { text: $json.digest || '' } }];",
+        "jsCode": "return [{ json: { chunks: $json.digest_chunks || [] } }];",
         "mode": "runOnceForAllItems"
       },
       "id": "node-eod-prep-telegram",
@@ -185,7 +185,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const text = $input.first().json.text || \"Aucune actualité pertinente aujourd'hui.\";\nconst MAX = 4000;\nfunction stripTags(s){ return s.replace(/<[^>]+>/g, ''); }\nif (text.length <= MAX) {\n  return [{ json: { chunk: text } }];\n}\nconst paragraphs = text.split(/\\n\\n+/);\nconst chunks = [];\nlet current = '';\nfor (const para of paragraphs) {\n  const candidate = current ? current + '\\n\\n' + para : para;\n  if (candidate.length <= MAX) { current = candidate; continue; }\n  if (current) { chunks.push(current); current = ''; }\n  if (para.length <= MAX) { current = para; }\n  else {\n    const plain = stripTags(para);\n    for (let i = 0; i < plain.length; i += MAX) chunks.push(plain.slice(i, i + MAX));\n  }\n}\nif (current) chunks.push(current);\nreturn chunks.map((chunk) => ({ json: { chunk } }));\n"
+        "jsCode": "// Relais pur (Epic 9 S4) : le decoupage Telegram est fait en Python\n// (market_intelligence/telegram_split.py), seule implementation testee.\nreturn ($input.first().json.chunks || []).map((chunk) => ({ json: { chunk } }));\n"
       },
       "id": "node-eod-split",
       "name": "Split EOD for Telegram",
@@ -304,7 +304,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: { warrenText: ($json.stdout || '').trim() } }];",
+        "jsCode": "// Le producteur Python imprime {text, chunks} : `text` alimente la garde\n// \"contenu non vide\", `chunks` part tel quel vers le relais Split.\nconst raw = ($json.stdout || '').trim();\nconst payload = raw ? JSON.parse(raw) : {};\nreturn [{ json: { warrenText: (payload.text || '').trim(), chunks: payload.chunks || [] } }];\n",
         "mode": "runOnceForAllItems"
       },
       "id": "node-heartbeat-prep",
@@ -351,7 +351,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: { warrenText: ($json.stdout || '').trim() } }];",
+        "jsCode": "// Le producteur Python imprime {text, chunks} : `text` alimente la garde\n// \"contenu non vide\", `chunks` part tel quel vers le relais Split.\nconst raw = ($json.stdout || '').trim();\nconst payload = raw ? JSON.parse(raw) : {};\nreturn [{ json: { warrenText: (payload.text || '').trim(), chunks: payload.chunks || [] } }];\n",
         "mode": "runOnceForAllItems"
       },
       "id": "node-monthly-report-prep",

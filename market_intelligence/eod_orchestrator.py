@@ -5,7 +5,6 @@ import fcntl
 import html
 import json
 import logging
-import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -32,6 +31,7 @@ from market_intelligence.short_interest import (
     ShortInterestResult,
     fetch_all_short_interest,
 )
+from market_intelligence.telegram_split import split_telegram_html
 from market_intelligence.tension_signals import (
     append_tension_journal,
     format_tension_digest,
@@ -115,7 +115,12 @@ class EodRunResult:
     candidates_detail: tuple[CandidateDetail, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
-        """Return an n8n-friendly JSON payload."""
+        """Return an n8n-friendly JSON payload.
+
+        ``digest_chunks`` (Epic 9 S4) porte le découpage Telegram déjà fait : le
+        nœud n8n ``Split EOD for Telegram`` ne fait plus que le relayer, il ne
+        redécoupe rien.
+        """
         payload = asdict(self)
         payload["expected_symbols"] = list(self.expected_symbols)
         payload["fetched_symbols"] = list(self.fetched_symbols)
@@ -123,6 +128,7 @@ class EodRunResult:
         payload["candidates_detail"] = [
             detail.to_dict() for detail in self.candidates_detail
         ]
+        payload["digest_chunks"] = split_telegram_html(self.digest)
         return payload
 
 
@@ -218,13 +224,6 @@ def append_run_log(record: Mapping[str, object], path: Path = _RUNS_LOG_PATH) ->
             log_file.flush()
         finally:
             fcntl.flock(log_file.fileno(), fcntl.LOCK_UN)
-
-
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
-
-
-def _strip_html_tags(text: str) -> str:
-    return _HTML_TAG_RE.sub("", text)
 
 
 # ── Deterministic EOD digest (Epic 6, Sprint 3) ─────────────────────────────
@@ -571,36 +570,6 @@ def format_digest(
     return f"\n{_DIGEST_SEP}\n".join(sections)
 
 
-def split_telegram_html(text: str, limit: int = 4000) -> list[str]:
-    """Split HTML text into <=limit chunks without orphaning a tag.
-
-    Splits on paragraph (``\\n\\n``) boundaries; since each ``<b>`` tag is
-    contained in one paragraph, no chunk cuts a tag. A single oversized paragraph
-    (> limit) is degraded to plain text (tags stripped) then hard-sliced.
-    """
-    if len(text) <= limit:
-        return [text]
-    chunks: list[str] = []
-    current = ""
-    for paragraph in re.split(r"\n\n+", text):
-        candidate = f"{current}\n\n{paragraph}" if current else paragraph
-        if len(candidate) <= limit:
-            current = candidate
-            continue
-        if current:
-            chunks.append(current)
-            current = ""
-        if len(paragraph) <= limit:
-            current = paragraph
-        else:
-            plain = _strip_html_tags(paragraph)
-            for start in range(0, len(plain), limit):
-                chunks.append(plain[start : start + limit])
-    if current:
-        chunks.append(current)
-    return chunks
-
-
 def run_eod_anomaly_pipeline(
     *,
     history_days: int = DEFAULT_HISTORY_DAYS,
@@ -744,7 +713,8 @@ def _run_log_record(result: EodRunResult) -> dict[str, object]:
     """Project one run into a JSONL journal record (Epic 2).
 
     ``digest_chars``/``chunk_count`` (Epic 9 S3) are measured on every run, dry-run
-    and zero-survivor included, to size the Telegram split before refactoring it.
+    and zero-survivor included. Depuis le S4, ``chunk_count`` compte les morceaux
+    réellement envoyés à n8n (``digest_chunks``), pas un découpage recalculé.
     """
     payload = result.to_dict()
     return {
@@ -757,7 +727,7 @@ def _run_log_record(result: EodRunResult) -> dict[str, object]:
         "data_issues": list(result.data_issues),
         "should_send": result.should_send,
         "digest_chars": len(result.digest),
-        "chunk_count": len(split_telegram_html(result.digest)),
+        "chunk_count": len(payload["digest_chunks"]),  # type: ignore[arg-type]
     }
 
 

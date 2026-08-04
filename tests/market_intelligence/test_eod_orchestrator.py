@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import replace
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -516,6 +517,60 @@ def test_split_telegram_html_keeps_bold_balanced_across_chunks() -> None:
     for chunk in chunks:
         assert len(chunk) <= 4000
         assert chunk.count("<b>") == chunk.count("</b>")  # no orphan tag
+
+
+_GOLDEN_SPLIT = json.loads(
+    (Path(__file__).parent.parent / "fixtures" / "telegram_split_golden.json").read_text(
+        encoding="utf-8"
+    )
+)
+
+
+@pytest.mark.parametrize(
+    "case", _GOLDEN_SPLIT["cases"], ids=[c["name"] for c in _GOLDEN_SPLIT["cases"]]
+)
+def test_split_telegram_html_matches_golden_fixture(case: dict) -> None:
+    """Epic 9 S4: parite avec la reference figee, tolerance nulle.
+
+    La reference a ete enregistree en executant sous node le code des noeuds n8n
+    AVANT le refactor ; l'algorithme est deterministe et le corpus est fige, donc
+    l'invariant est l'egalite exacte de la liste, pas une approximation.
+    """
+    chunks = orchestrator.split_telegram_html(case["text"], _GOLDEN_SPLIT["limit"])
+
+    assert chunks == case["chunks"]
+
+
+@pytest.mark.parametrize(
+    "case", _GOLDEN_SPLIT["cases"], ids=[c["name"] for c in _GOLDEN_SPLIT["cases"]]
+)
+def test_split_telegram_html_loses_nothing(case: dict) -> None:
+    """La concatenation des morceaux reconstitue exactement le texte d'entree.
+
+    Les separateurs de paragraphe ne sont plus retires : ils restent colles au bloc
+    qui les precede, donc la restauration est l'identite. Le cas de degradation en
+    texte brut est exclu par construction — il retire les balises, c'est son role.
+    """
+    text = case["text"]
+    if case["name"] == "paragraphe_surdimensionne":
+        pytest.skip("degradation en texte brut : perte de balises assumee")
+
+    chunks = orchestrator.split_telegram_html(text, _GOLDEN_SPLIT["limit"])
+
+    assert "".join(chunks) == text
+
+
+def test_split_telegram_html_never_orphans_a_survivor_title() -> None:
+    """Epic 9 S4 : un en-tete de survivant et sa prose ne sont jamais separes."""
+    case = next(c for c in _GOLDEN_SPLIT["cases"] if c["name"] == "digest_long")
+
+    chunks = orchestrator.split_telegram_html(case["text"], _GOLDEN_SPLIT["limit"])
+
+    assert len(chunks) > 1  # sinon le test est vrai par vacuite
+    for chunk in chunks:
+        assert not chunk.rstrip().endswith("</b>"), (
+            "un morceau se termine sur un titre sans sa prose"
+        )
 
 
 def _result_with_digest(digest: str) -> orchestrator.EodRunResult:

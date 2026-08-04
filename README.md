@@ -399,6 +399,7 @@ stock-tracker/
 │   ├── sector_rotation.py     # Sector ETF rotation + IWM/SPY ratio (zero LLM)
 │   ├── fear_greed.py          # CNN Fear & Greed index (zero LLM)
 │   ├── v5_bridge.py           # smallcaps v5 cohorts → watchlist reconciliation (zero LLM)
+│   ├── telegram_split.py      # Telegram 4096-char split — sole implementation, n8n only relays
 │   └── data/                  # registry, quarantine, thresholds, sector factors
 ├── skills/                    # OpenClaw skills sources
 │   ├── tickerbrief/           # On-demand ticker brief skill spec (SKILL.md)
