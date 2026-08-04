@@ -1,4 +1,4 @@
-.PHONY: results results-check test lint validate-json
+.PHONY: results results-check test lint validate-json check-referential test-deploy
 
 # Entrypoints de verification : la CI appelle ces cibles, pas les outils
 # directement, pour que poste local et CI executent strictement la meme chose.
@@ -13,6 +13,13 @@ validate-json:
 	python3 -m json.tool portfolio.example.json > /dev/null
 	python3 -m json.tool watchlist.example.json > /dev/null
 	@echo "All JSON files valid."
+
+check-referential:
+	python3 -m market_intelligence.registry_check
+
+# Verdict de deploiement (deploy/deploy_verdict.py), testable sans VPS.
+test-deploy:
+	python3 -m pytest -q tests/deploy
 
 
 # Regenerate docs/RESULTS.md + docs/data/backtest_<date>.json from scratch.

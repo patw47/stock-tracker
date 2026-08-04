@@ -80,8 +80,9 @@ warren_status="inactive"
 [ "$oc_active" = "active" ] && warren_status="active"
 
 # 5b. Watchdog EOD (Epic 2 S2) : installe/active le timer systemd. Indépendant de
-#     n8n — alerte Telegram si le run 21:30 UTC manque. N'influence pas overall
-#     (garde-fou externe) mais son état est rapporté via STATUS_WATCHDOG_TIMER.
+#     n8n — alerte Telegram si le run 21:30 UTC manque. Entre dans STATUS_OVERALL
+#     depuis Epic 9 S2 : timer non actif = déploiement en échec. Rapporté via
+#     STATUS_WATCHDOG_TIMER.
 log "install/enable watchdog EOD timer"
 sudo cp "$REPO/deploy/eod-watchdog.service" /etc/systemd/system/eod-watchdog.service
 sudo cp "$REPO/deploy/eod-watchdog.timer"   /etc/systemd/system/eod-watchdog.timer
@@ -90,8 +91,9 @@ sudo systemctl enable --now eod-watchdog.timer >/dev/null 2>&1
 wd_timer=$(systemctl is-active eod-watchdog.timer 2>/dev/null || echo inactive)
 
 # 5c. Outcome tracker (Epic 5 S1) : timer systemd, ~1h après le run EOD, jours
-#     ouvrés. Hors chemin critique (mesure a posteriori des alertes) — n'influence
-#     pas overall, état rapporté via STATUS_OUTCOME_TIMER.
+#     ouvrés. Mesure a posteriori des alertes ; entre dans STATUS_OVERALL depuis
+#     Epic 9 S2 : timer non actif = déploiement en échec. Rapporté via
+#     STATUS_OUTCOME_TIMER.
 log "install/enable outcome tracker timer"
 sudo cp "$REPO/deploy/outcome-tracker.service" /etc/systemd/system/outcome-tracker.service
 sudo cp "$REPO/deploy/outcome-tracker.timer"   /etc/systemd/system/outcome-tracker.timer
@@ -100,8 +102,8 @@ sudo systemctl enable --now outcome-tracker.timer >/dev/null 2>&1
 ot_timer=$(systemctl is-active outcome-tracker.timer 2>/dev/null || echo inactive)
 
 # 5d. Tension outcomes (Layer C) : timer systemd, juste après outcome-tracker,
-#     jours ouvrés. Hors chemin critique — n'influence pas overall, état
-#     rapporté via STATUS_TENSION_TIMER.
+#     jours ouvrés. Entre dans STATUS_OVERALL depuis Epic 9 S2 : timer non actif
+#     = déploiement en échec. Rapporté via STATUS_TENSION_TIMER.
 log "install/enable tension outcomes timer"
 sudo cp "$REPO/deploy/tension-outcomes.service" /etc/systemd/system/tension-outcomes.service
 sudo cp "$REPO/deploy/tension-outcomes.timer"   /etc/systemd/system/tension-outcomes.timer
@@ -110,7 +112,8 @@ sudo systemctl enable --now tension-outcomes.timer >/dev/null 2>&1
 tn_timer=$(systemctl is-active tension-outcomes.timer 2>/dev/null || echo inactive)
 
 # 5e. Referential sync (Telegram → git) : path unit sur market_intelligence/data/,
-#     commit [skip ci] + push après onboarding/offboarding. Hors chemin critique.
+#     commit [skip ci] + push après onboarding/offboarding. Entre dans
+#     STATUS_OVERALL depuis Epic 9 S2 : path unit non active = déploiement en échec.
 log "install/enable referential sync path unit"
 sudo cp "$REPO/deploy/referential-sync.service" /etc/systemd/system/referential-sync.service
 sudo cp "$REPO/deploy/referential-sync.path"    /etc/systemd/system/referential-sync.path
@@ -119,8 +122,9 @@ sudo systemctl enable --now referential-sync.path >/dev/null 2>&1
 rs_path=$(systemctl is-active referential-sync.path 2>/dev/null || echo inactive)
 
 # 5f. Pont v5 (Epic 8 S2) : timer systemd quotidien 20h45 UTC, jours ouvrés —
-#     après le scan smallcaps du jour, avant le run EOD de 21h30. Hors chemin
-#     critique : un échec du pont laisse la watchlist telle quelle.
+#     après le scan smallcaps du jour, avant le run EOD de 21h30. Un échec du pont
+#     laisse la watchlist telle quelle ; le timer, lui, entre dans STATUS_OVERALL
+#     depuis Epic 9 S2 : non actif = déploiement en échec.
 log "install/enable v5 bridge timer"
 sudo cp "$REPO/deploy/v5-bridge.service" /etc/systemd/system/v5-bridge.service
 sudo cp "$REPO/deploy/v5-bridge.timer"   /etc/systemd/system/v5-bridge.timer
@@ -128,12 +132,14 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now v5-bridge.timer >/dev/null 2>&1
 v5_timer=$(systemctl is-active v5-bridge.timer 2>/dev/null || echo inactive)
 
-overall="ok"
-if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
-   || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ] \
-   || [ "$registry_rc" -ne 0 ]; then
-  overall="fail"
-fi
+# Verdict global (Epic 9 S2) : extrait dans deploy/deploy_verdict.py, testable
+# hors VPS avec des statuts fournis en entrée (voir tests/deploy/test_deploy_verdict.py).
+overall=$(STATUS_STOCK_TRACKER="$st_active" STATUS_N8N_HEALTH="$n8n_health" \
+  STATUS_WARREN="$warren_status" STATUS_WATCHDOG_TIMER="$wd_timer" \
+  STATUS_OUTCOME_TIMER="$ot_timer" STATUS_TENSION_TIMER="$tn_timer" \
+  STATUS_REFERENTIAL_SYNC="$rs_path" STATUS_V5_TIMER="$v5_timer" \
+  IMPORT_RC="$import_rc" REGISTRY_RC="$registry_rc" \
+  python3 "$REPO/deploy/deploy_verdict.py")
 
 log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active) watchdog_timer=$wd_timer outcome_timer=$ot_timer tension_timer=$tn_timer v5_timer=$v5_timer import_rc=$import_rc registry_rc=$registry_rc"
 
