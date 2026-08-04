@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import replace
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -516,6 +517,28 @@ def test_split_telegram_html_keeps_bold_balanced_across_chunks() -> None:
     for chunk in chunks:
         assert len(chunk) <= 4000
         assert chunk.count("<b>") == chunk.count("</b>")  # no orphan tag
+
+
+_GOLDEN_SPLIT = json.loads(
+    (Path(__file__).parent.parent / "fixtures" / "telegram_split_golden.json").read_text(
+        encoding="utf-8"
+    )
+)
+
+
+@pytest.mark.parametrize(
+    "case", _GOLDEN_SPLIT["cases"], ids=[c["name"] for c in _GOLDEN_SPLIT["cases"]]
+)
+def test_split_telegram_html_matches_golden_fixture(case: dict) -> None:
+    """Epic 9 S4: parite avec la reference figee, tolerance nulle.
+
+    La reference a ete enregistree en executant sous node le code des noeuds n8n
+    AVANT le refactor ; l'algorithme est deterministe et le corpus est fige, donc
+    l'invariant est l'egalite exacte de la liste, pas une approximation.
+    """
+    chunks = orchestrator.split_telegram_html(case["text"], _GOLDEN_SPLIT["limit"])
+
+    assert chunks == case["chunks"]
 
 
 def _result_with_digest(digest: str) -> orchestrator.EodRunResult:
