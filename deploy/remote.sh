@@ -128,12 +128,14 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now v5-bridge.timer >/dev/null 2>&1
 v5_timer=$(systemctl is-active v5-bridge.timer 2>/dev/null || echo inactive)
 
-overall="ok"
-if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
-   || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ] \
-   || [ "$registry_rc" -ne 0 ]; then
-  overall="fail"
-fi
+# Verdict global (Epic 9 S2) : extrait dans deploy/deploy_verdict.py, testable
+# hors VPS avec des statuts fournis en entrée (voir tests/deploy/test_deploy_verdict.py).
+overall=$(STATUS_STOCK_TRACKER="$st_active" STATUS_N8N_HEALTH="$n8n_health" \
+  STATUS_WARREN="$warren_status" STATUS_WATCHDOG_TIMER="$wd_timer" \
+  STATUS_OUTCOME_TIMER="$ot_timer" STATUS_TENSION_TIMER="$tn_timer" \
+  STATUS_REFERENTIAL_SYNC="$rs_path" STATUS_V5_TIMER="$v5_timer" \
+  IMPORT_RC="$import_rc" REGISTRY_RC="$registry_rc" \
+  python3 "$REPO/deploy/deploy_verdict.py")
 
 log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active) watchdog_timer=$wd_timer outcome_timer=$ot_timer tension_timer=$tn_timer v5_timer=$v5_timer import_rc=$import_rc registry_rc=$registry_rc"
 
