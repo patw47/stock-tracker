@@ -24,7 +24,7 @@ done
 
 # 0. Dépendances Python du pipeline EOD (pandas/yfinance/numpy/pyarrow/requests).
 #    Installées dans le python système (/usr/bin/python3) qu'utilisent le run EOD
-#    et les timers systemd (watchdog, outcome-tracker, tension-outcomes).
+#    et les timers systemd (watchdog, outcome-tracker, tension-outcomes, v5-bridge).
 if [ -f "$REPO/requirements.txt" ]; then
   log "install deps python (requirements.txt)"
   sudo python3 -m pip install -r "$REPO/requirements.txt" --break-system-packages -q \
@@ -118,6 +118,16 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now referential-sync.path >/dev/null 2>&1
 rs_path=$(systemctl is-active referential-sync.path 2>/dev/null || echo inactive)
 
+# 5f. Pont v5 (Epic 8 S2) : timer systemd quotidien 20h45 UTC, jours ouvrés —
+#     après le scan smallcaps du jour, avant le run EOD de 21h30. Hors chemin
+#     critique : un échec du pont laisse la watchlist telle quelle.
+log "install/enable v5 bridge timer"
+sudo cp "$REPO/deploy/v5-bridge.service" /etc/systemd/system/v5-bridge.service
+sudo cp "$REPO/deploy/v5-bridge.timer"   /etc/systemd/system/v5-bridge.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now v5-bridge.timer >/dev/null 2>&1
+v5_timer=$(systemctl is-active v5-bridge.timer 2>/dev/null || echo inactive)
+
 overall="ok"
 if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
    || [ "$warren_status" != "active" ] || [ "$import_rc" -ne 0 ] \
@@ -125,7 +135,7 @@ if [ "$st_active" != "active" ] || [ "$n8n_health" != "ok" ] \
   overall="fail"
 fi
 
-log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active) watchdog_timer=$wd_timer outcome_timer=$ot_timer tension_timer=$tn_timer import_rc=$import_rc registry_rc=$registry_rc"
+log "résumé: stock-tracker=$st_active n8n=$n8n_health(http=$code) warren=$warren_status (openclaw=$oc_active) watchdog_timer=$wd_timer outcome_timer=$ot_timer tension_timer=$tn_timer v5_timer=$v5_timer import_rc=$import_rc registry_rc=$registry_rc"
 
 # Lignes machine-lisibles consommées par deploy.yml.
 echo "STATUS_STOCK_TRACKER=$st_active"
@@ -135,4 +145,5 @@ echo "STATUS_WATCHDOG_TIMER=$wd_timer"
 echo "STATUS_OUTCOME_TIMER=$ot_timer"
 echo "STATUS_TENSION_TIMER=$tn_timer"
 echo "STATUS_REFERENTIAL_SYNC=$rs_path"
+echo "STATUS_V5_TIMER=$v5_timer"
 echo "STATUS_OVERALL=$overall"

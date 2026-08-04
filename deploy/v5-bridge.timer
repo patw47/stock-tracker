@@ -1,0 +1,13 @@
+[Unit]
+Description=Bridge smallcaps v5 cohort members into the watchlist on weekdays before the EOD run
+
+[Timer]
+# After the smallcaps scan of the day, before the 21:30 UTC EOD run: a ticker
+# qualified today is scanned by the tension tier (Layer C) the same evening.
+# UTC pinned explicitly so the schedule does not drift with the VPS timezone.
+OnCalendar=Mon..Fri *-*-* 20:45:00 UTC
+Persistent=true
+Unit=v5-bridge.service
+
+[Install]
+WantedBy=timers.target

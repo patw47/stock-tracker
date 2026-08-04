@@ -257,13 +257,29 @@ in forward validation.
 - **Fail-soft throughout** — API down, non-200, malformed payload → logged no-op.
   Empty tracking *while* bridged tickers are still under horizon → no-op plus a
   warning: that is an anomaly, never a purge.
-- **Disabling it** — stop the systemd unit; the watchlist keeps whatever it holds
-  (bridged entries stop expiring, which is inert). Removing them by hand means
-  dropping the entries tagged `smallcaps-v5`.
+- **Cadence** — `v5-bridge.timer`, 20:45 UTC Mon–Fri: after the smallcaps scan of
+  the day, before the 21:30 UTC EOD run, so a ticker qualified today is scanned by
+  Layer C the same evening. `Persistent=true`, so a run missed while the VPS was
+  down fires at boot — harmless, the reconciliation is idempotent. Installed and
+  enabled by `deploy/remote.sh` like the other timers; state reported as
+  `STATUS_V5_TIMER`.
+- **Not committed to git** — `watchlist.json` is gitignored (only the `.example`
+  files are versioned), and `referential-sync.path` watches
+  `market_intelligence/data/`, not the repo root. The bridge's writes therefore
+  live on the VPS only, exactly like a Telegram `/modifywatchlist` add. Nothing to
+  wire: the runtime lists have never been versioned.
+- **Disabling it** — `sudo systemctl disable --now v5-bridge.timer`; the watchlist
+  keeps whatever it holds (bridged entries stop expiring, which is inert).
+  Removing them by hand means dropping the entries tagged `smallcaps-v5`.
 
 Run it manually: `python3 -m market_intelligence.v5_bridge` (prints the run
-summary as JSON). The daily cadence (systemd timer, 20:45 UTC Mon–Fri, after the
-smallcaps scan and before the 21:30 EOD run) ships in Sprint 2.
+summary as JSON), or `sudo systemctl start v5-bridge.service` on the VPS.
+
+> **First run adds ~80 tickers, not ~20.** The tracking journal carries every
+> cohort member still under horizon, not just the day's entries — measured at 82
+> on 2026-08-04. Well under the cap of 150, but the watchlist jumps from ~152 to
+> ~234 symbols: check the EOD run duration afterwards (baseline: 2 min 05 for 181
+> symbols).
 
 ---
 

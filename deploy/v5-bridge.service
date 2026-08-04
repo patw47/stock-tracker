@@ -1,0 +1,13 @@
+[Unit]
+Description=Stock Tracker v5 bridge (reconcile watchlist.json with the smallcaps v5 cohort tracking)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=queenp
+WorkingDirectory=/opt/apps/stock-tracker
+# Loopback only: the smallcaps API has no authentication and serves unversioned
+# edge values. Never point this at a public URL.
+Environment=SMALLCAPS_API_URL=http://localhost:8000
+ExecStart=/usr/bin/python3 -m market_intelligence.v5_bridge
