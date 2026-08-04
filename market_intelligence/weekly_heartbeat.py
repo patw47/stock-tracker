@@ -20,6 +20,8 @@ from collections.abc import Iterable
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+from market_intelligence.telegram_split import split_telegram_html
+
 _RUNS_LOG_PATH = (
     Path(__file__).parent.parent / "runtime" / "market_intelligence" / "runs.jsonl"
 )
@@ -123,8 +125,17 @@ def load_records(path: Path = _RUNS_LOG_PATH) -> list[dict]:
 
 
 def main() -> None:
-    records = load_records()
-    print(build_heartbeat(records, datetime.now(timezone.utc).date()))
+    """Print the n8n payload: the message and its Telegram chunks (Epic 9 S4).
+
+    Le découpage est fait ici, plus dans le nœud n8n ``Split for Telegram`` qui se
+    contente désormais de relayer ``chunks``.
+    """
+    text = build_heartbeat(load_records(), datetime.now(timezone.utc).date())
+    print(
+        json.dumps(
+            {"text": text, "chunks": split_telegram_html(text)}, ensure_ascii=False
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -22,6 +22,8 @@ from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+from market_intelligence.telegram_split import split_telegram_html
+
 _RUNTIME_DIR = Path(__file__).parent.parent / "runtime" / "market_intelligence"
 OUTCOMES_PATH = _RUNTIME_DIR / "outcomes.jsonl"
 RUNS_LOG_PATH = _RUNTIME_DIR / "runs.jsonl"
@@ -240,7 +242,14 @@ def main(argv: list[str] | None = None) -> int:
     today = datetime.now(timezone.utc).date()
     if not is_first_friday(today):
         return 0
-    print(run(today=today))
+    text = run(today=today)
+    # Epic 9 S4 : le découpage Telegram est fait ici ; le nœud n8n
+    # `Split for Telegram` ne fait plus que relayer `chunks`.
+    print(
+        json.dumps(
+            {"text": text, "chunks": split_telegram_html(text)}, ensure_ascii=False
+        )
+    )
     return 0
 
 

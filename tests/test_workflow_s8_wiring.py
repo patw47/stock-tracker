@@ -118,6 +118,30 @@ def test_eod_branch_uses_registry_runner_and_reuses_telegram_nodes() -> None:
     assert _edge_targets(workflow, "Aggregate for Telegram") == ["Split for Telegram"]
 
 
+def test_split_nodes_are_pure_relays() -> None:
+    """Epic 9 S4: le decoupage vit en Python, les noeuds Split ne font que relayer.
+
+    Plus de stripTags, plus de constante MAX, plus d'algorithme : une seule
+    implementation (market_intelligence/telegram_split.py), et c'est la testee.
+    """
+    workflow = _workflow()
+    nodes = _nodes_by_name(workflow)
+
+    for name in ("Split for Telegram", "Split EOD for Telegram"):
+        code = nodes[name]["parameters"]["jsCode"]
+        assert "chunks" in code
+        assert "stripTags" not in code
+        assert "MAX" not in code
+        assert "split(" not in code
+    assert "stripTags" not in json.dumps(workflow)
+
+    # Les morceaux arrivent du Python : digest_chunks (EOD) / chunks (chaine partagee).
+    assert "digest_chunks" in nodes["Prepare EOD Digest for Telegram"]["parameters"]["jsCode"]
+    assert "chunks" in nodes["Aggregate for Telegram"]["parameters"]["jsCode"]
+    for name in ("Prepare Heartbeat for Telegram", "Prepare Monthly Report for Telegram"):
+        assert "JSON.parse" in nodes[name]["parameters"]["jsCode"]
+
+
 def test_two_phase_commit_node_wiring() -> None:
     workflow = _workflow()
     nodes = _nodes_by_name(workflow)
