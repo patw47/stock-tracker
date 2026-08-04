@@ -140,6 +140,8 @@ def test_split_nodes_are_pure_relays() -> None:
     assert "chunks" in nodes["Aggregate for Telegram"]["parameters"]["jsCode"]
     for name in ("Prepare Heartbeat for Telegram", "Prepare Monthly Report for Telegram"):
         assert "JSON.parse" in nodes[name]["parameters"]["jsCode"]
+        # Un renommage de ce champ viderait les messages en silence (review S4, M4).
+        assert "chunks" in nodes[name]["parameters"]["jsCode"]
 
 
 def test_two_phase_commit_node_wiring() -> None:
