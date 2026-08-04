@@ -359,7 +359,7 @@ Never hand-edit `portfolio.json` / `watchlist.json` — the flow goes through `a
 - **Referential consistency enforced** — `registry_check` blocking in CI and at deploy
 - **Self-measured signal** — J+1/J+5/J+20 outcomes, monthly report, no-look-ahead backtest
 - **systemd managed** — n8n, OpenClaw gateway (on-demand Warren) + watchdog/outcome timers
-- **CI/CD** — push to `main` → 364 tests → auto-deploy on the VPS via self-hosted runner (workflow version published, referential validated)
+- **CI/CD** — push to `main` → 372 tests → auto-deploy on the VPS via self-hosted runner (workflow version published, referential validated)
 
 ---
 
@@ -398,15 +398,16 @@ stock-tracker/
 │   ├── weekly_heartbeat.py    # Friday proof-of-life message (zero LLM)
 │   ├── sector_rotation.py     # Sector ETF rotation + IWM/SPY ratio (zero LLM)
 │   ├── fear_greed.py          # CNN Fear & Greed index (zero LLM)
+│   ├── v5_bridge.py           # smallcaps v5 cohorts → watchlist reconciliation (zero LLM)
 │   └── data/                  # registry, quarantine, thresholds, sector factors
 ├── skills/                    # OpenClaw skills sources
 │   ├── tickerbrief/           # On-demand ticker brief skill spec (SKILL.md)
 │   ├── modifyportfolio/       # Portfolio management via Telegram (with Layer B onboarding)
 │   └── modifywatchlist/       # Watchlist management via Telegram (with Layer B onboarding)
-├── tests/                     # pytest suite — 364 tests (agents, market_intelligence, deploy, workflow wiring)
+├── tests/                     # pytest suite — 372 tests (agents, market_intelligence, deploy, workflow wiring)
 ├── docs/                      # project-structure, deployment, backtest guide, ticker schema
 ├── deploy/                    # CI/CD: remote.sh, import_workflow.py (version publish),
-│                              # watchdog_eod.py + systemd units/timers (watchdog, outcome tracker)
+│                              # watchdog_eod.py + systemd units/timers (watchdog, outcome tracker, v5 bridge)
 └── .github/workflows/         # CI + auto-deploy + Notion sync
 
 /home/warren/.openclaw/workspace-warren/      (on the VPS)
@@ -769,7 +770,7 @@ Warren stores raw news per ticker in `/home/warren/.openclaw/workspace-warren/me
 ```bash
 # Status (services + reliability timers)
 sudo systemctl status stock-tracker warren-server openclaw-warren
-systemctl list-timers eod-watchdog.timer outcome-tracker.timer
+systemctl list-timers eod-watchdog.timer outcome-tracker.timer v5-bridge.timer
 
 # Restart all
 sudo systemctl restart openclaw-warren warren-server stock-tracker
@@ -779,6 +780,7 @@ sudo journalctl -u stock-tracker -f       # n8n logs
 sudo journalctl -u openclaw-warren -f     # OpenClaw logs
 sudo journalctl -u eod-watchdog.service -n 20   # last watchdog verdict
 sudo journalctl -u outcome-tracker.service -n 20
+sudo journalctl -u v5-bridge.service -n 20      # last bridge reconciliation
 
 # "Why did I receive nothing tonight?" — the run explains itself
 tail -1 runtime/market_intelligence/runs.jsonl | python3 -m json.tool
