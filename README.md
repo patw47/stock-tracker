@@ -228,6 +228,45 @@ tally.
 
 ---
 
+## 🌉 v5 bridge — smallcaps cohorts into the watchlist
+
+`market_intelligence/v5_bridge.py` makes every ticker that entered a **washout
+cohort** in [smallcaps-screener](https://app.notion.com/p/3ae681d3ae94816c9611d1c61d562677)
+watched by Layer C for its judgment window, then drops it out again. It carries
+**attention, never a verdict**: both signals (tension here, v5 cohort there) are
+in forward validation.
+
+- **Source** — the smallcaps API on the same VPS, read at `SMALLCAPS_API_URL`
+  (default `http://localhost:8000`). The `/api/scan` payload embeds the v5
+  tracking journal (one row per window × ticker). The union of the 7/14/21-day
+  windows is deduplicated per ticker, longest `days_held` winning.
+  ⚠️ **Never point this at a public URL**: the API has no authentication and
+  serves unversioned edge values.
+- **Reconciliation, not an event stream** — the target state is derived from the
+  journal on every run: tracked and `days_held < 63` → in the watchlist;
+  `days_held >= 63` (the v5 judgment horizon) or gone from the journal → out.
+  Idempotent, so a missed run costs nothing.
+- **Watchlist only, never Layer B** — entries are written through the atomic
+  helpers of `agents/warren/manage_tickers.py`; registry onboarding stays a human
+  decision in a PR. The ticker is covered by the tension tier the same evening
+  and `registry_check` reports it as `info`, never blocking.
+- **Provenance `source: "smallcaps-v5"`** — the bridge removes **only** its own
+  entries. A ticker added via Telegram is untouchable (safety rule #1).
+- **Cap of 150** bridged tickers, with an explicit log line listing the excluded
+  ones — never a silent truncation.
+- **Fail-soft throughout** — API down, non-200, malformed payload → logged no-op.
+  Empty tracking *while* bridged tickers are still under horizon → no-op plus a
+  warning: that is an anomaly, never a purge.
+- **Disabling it** — stop the systemd unit; the watchlist keeps whatever it holds
+  (bridged entries stop expiring, which is inert). Removing them by hand means
+  dropping the entries tagged `smallcaps-v5`.
+
+Run it manually: `python3 -m market_intelligence.v5_bridge` (prints the run
+summary as JSON). The daily cadence (systemd timer, 20:45 UTC Mon–Fri, after the
+smallcaps scan and before the 21:30 EOD run) ships in Sprint 2.
+
+---
+
 ## 🛡️ Reliability & self-measurement (Epics 1–5, July 2026)
 
 After post-mortem PM-0001 (19 days of silence: the n8n workflow version was
@@ -686,6 +725,10 @@ registry reads them at runtime. Three ways to edit:
    at the next run, no n8n change needed.
 3. **Git** — commit the change; deploy syncs the files.
 
+The [v5 bridge](#-v5-bridge--smallcaps-cohorts-into-the-watchlist) also writes to
+`watchlist.json`, but only entries tagged `source: "smallcaps-v5"` — it never
+touches the ones you added.
+
 Each entry needs `symbol`, `name`, `sector` (see `docs/ticker-files-schema.md`).
 New tickers are validated against the Layer B registry; unresolvable symbols are
 quarantined (`market_intelligence/data/quarantine.json`) instead of corrupting analysis.
@@ -739,6 +782,7 @@ python3 -m market_intelligence.dedup_admin reset --ticker SYMBOL
 | `TELEGRAM_TOKEN` | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | Target chat ID |
 | `TWELVE_DATA_API_KEY` | Layer B EOD data fallback (yfinance primary) |
+| `SMALLCAPS_API_URL` | smallcaps-screener API for the v5 bridge (default `http://localhost:8000`, loopback only) |
 | `NODE_FUNCTION_ALLOW_BUILTIN` | Must include `fs` — n8n Code nodes read the ticker JSON files |
 | `N8N_PORT` | n8n HTTP port (default: `5680`) |
 | `N8N_USER_FOLDER` | n8n data directory |
