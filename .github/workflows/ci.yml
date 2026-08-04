@@ -14,36 +14,31 @@ on:
 
 jobs:
   validate:
-    name: Validate JSON files
+    name: Validate, lint and test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate JSON syntax
-        id: validate
-        run: |
-          echo "Validating workflow.json..."
-          python -m json.tool workflow.json > /dev/null
-          echo "Validating portfolio.example.json..."
-          python -m json.tool portfolio.example.json > /dev/null
-          echo "Validating watchlist.example.json..."
-          python -m json.tool watchlist.example.json > /dev/null
-          echo "All JSON files valid."
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt pytest
+        run: pip install -r requirements.txt pytest ruff
+
+      - name: Validate JSON syntax
+        run: make validate-json
 
       - name: Validate ticker referential coherence
         run: python -m market_intelligence.registry_check
 
+      - name: Lint
+        run: make lint
+
       - name: Run tests
-        run: pytest -q
+        run: make test
 
       - name: Sync QA result to Notion
         if: always()
@@ -54,6 +49,17 @@ jobs:
           TELEGRAM_ORCHESTRATION_BOT_TOKEN: ${{ secrets.TELEGRAM_ORCHESTRATION_BOT_TOKEN }}
           TELEGRAM_ORCHESTRATION_CHAT_ID: ${{ secrets.TELEGRAM_ORCHESTRATION_CHAT_ID }}
         run: |
+          # job.status aggregates every preceding verification step (JSON, referential,
+          # lint, tests). The former condition only looked at JSON validation, so a run
+          # with failing tests reported a green QA verdict to Notion.
+          if [ "${{ job.status }}" = "success" ]; then
+            CI_PASSED_FLAG="--ci-passed"
+            echo "QA verdict: PASS — reporting success to Notion (job.status=${{ job.status }})"
+          else
+            CI_PASSED_FLAG="--no-ci-passed"
+            echo "QA verdict: FAIL — reporting failure to Notion (job.status=${{ job.status }})"
+          fi
+
           # .ticket-id written by the Dispatcher takes precedence over workflow_dispatch input.
           TICKET_ID=$(cat .ticket-id 2>/dev/null || echo "")
           if [ -z "$TICKET_ID" ]; then
@@ -70,18 +76,13 @@ jobs:
 
           pip install "git+https://${{ secrets.GH_PAT }}@github.com/patw47/orchestration.git" --quiet
 
-          if [ "${{ steps.validate.outcome }}" = "success" ]; then
-            python -m orchestration.qa_sync \
-              --ticket-id "$TICKET_ID" \
-              --ci-passed \
-              --pr-url "$PR_URL" \
-              --ci-run-url "$CI_RUN_URL" \
-              --branch "$BRANCH" || true
-          else
-            python -m orchestration.qa_sync \
-              --ticket-id "$TICKET_ID" \
-              --no-ci-passed \
-              --pr-url "" \
-              --ci-run-url "$CI_RUN_URL" \
-              --branch "$BRANCH" || true
+          if [ "$CI_PASSED_FLAG" = "--no-ci-passed" ]; then
+            PR_URL=""
           fi
+
+          python -m orchestration.qa_sync \
+            --ticket-id "$TICKET_ID" \
+            "$CI_PASSED_FLAG" \
+            --pr-url "$PR_URL" \
+            --ci-run-url "$CI_RUN_URL" \
+            --branch "$BRANCH" || true

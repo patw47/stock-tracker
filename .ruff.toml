@@ -1,0 +1,11 @@
+# Le VPS de prod tourne sous Ubuntu 22.04 (python systeme 3.10) : cibler py311
+# ferait proposer a ruff des reecritures (datetime.UTC, PEP 604 a l'execution)
+# qui casseraient le run EOD. La CI reste en 3.11, la cible lint reste py310.
+target-version = "py310"
+
+# Jeu volontairement restreint : erreurs reelles (E/F), ordre d'imports et
+# syntaxe moderne exiges par .conventions/python.md (I, UP), pieges courants
+# (B, SIM, C4). D (docstrings, 412 hits) et ARG (93) sont hors perimetre du
+# sprint : les activer imposerait une reecriture de masse sans rapport avec la CI.
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM", "C4"]

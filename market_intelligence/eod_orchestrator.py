@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import html
 import json
 import logging
@@ -12,25 +13,31 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final, Protocol
 
-import fcntl
 import pandas as pd
 
 from market_intelligence.anomaly_signals import AnomalySignals, calculate_all
 from market_intelligence.beta_gate import calculate_all as calculate_beta_gates
 from market_intelligence.candidate_alerts import AlertThresholdConfig, CandidateAlert
 from market_intelligence.candidate_alerts import evaluate_all as evaluate_candidates
-from market_intelligence.dedup_hysteresis import DeduplicatedAlert
-from market_intelligence.dedup_hysteresis import SuppressionDetail
-from market_intelligence.dedup_hysteresis import dedup_readonly_env
-from market_intelligence.dedup_hysteresis import deduplicate_alerts
-from market_intelligence.dedup_hysteresis import default_pending_path
+from market_intelligence.dedup_hysteresis import (
+    DeduplicatedAlert,
+    SuppressionDetail,
+    dedup_readonly_env,
+    deduplicate_alerts,
+    default_pending_path,
+)
 from market_intelligence.fetch_eod import fetch_all, fetch_symbols
 from market_intelligence.registry_schema import Registry, load_quarantine, load_registry
-from market_intelligence.short_interest import ShortInterestResult, fetch_all_short_interest
+from market_intelligence.short_interest import (
+    ShortInterestResult,
+    fetch_all_short_interest,
+)
 from market_intelligence.tension_signals import (
     append_tension_journal,
-    calculate_all as calculate_tension_signals,
     format_tension_digest,
+)
+from market_intelligence.tension_signals import (
+    calculate_all as calculate_tension_signals,
 )
 
 logger = logging.getLogger(__name__)
@@ -286,18 +293,19 @@ def load_provenance_labels() -> dict[str, str] | None:
     ``REGISTRY_ONLY_LABEL`` at lookup time (they are in the registry but in no
     runtime list — a referential inconsistency worth showing).
     """
-    from market_intelligence.registry_check import _resolve_runtime_path, load_runtime_symbols
+    from market_intelligence.registry_check import (
+        _resolve_runtime_path,
+        load_runtime_symbols,
+    )
 
     try:
-        labels = {
-            symbol: WATCHLIST_LABEL
-            for symbol in load_runtime_symbols(_resolve_runtime_path("watchlist"))
-        }
+        labels = dict.fromkeys(
+            load_runtime_symbols(_resolve_runtime_path("watchlist")), WATCHLIST_LABEL
+        )
         labels.update(
-            {
-                symbol: PORTFOLIO_LABEL
-                for symbol in load_runtime_symbols(_resolve_runtime_path("portfolio"))
-            }
+            dict.fromkeys(
+                load_runtime_symbols(_resolve_runtime_path("portfolio")), PORTFOLIO_LABEL
+            )
         )
         return labels
     except Exception as exc:
@@ -774,7 +782,10 @@ def _load_watchlist_symbols() -> tuple[str, ...]:
     Off the critical path: any read/parse failure returns () and the EOD run
     proceeds on the portfolio alone.
     """
-    from market_intelligence.registry_check import _resolve_runtime_path, load_runtime_symbols
+    from market_intelligence.registry_check import (
+        _resolve_runtime_path,
+        load_runtime_symbols,
+    )
 
     try:
         return tuple(load_runtime_symbols(_resolve_runtime_path("watchlist")))

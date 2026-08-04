@@ -64,7 +64,7 @@ def test_market_model_removes_beta_move_and_excludes_current_day() -> None:
     noise = _orthogonal_noise(market_prior)
     stock_prior = [
         0.001 + 1.5 * value + noise_value
-        for value, noise_value in zip(market_prior, noise)
+        for value, noise_value in zip(market_prior, noise, strict=True)
     ]
     frames = {
         "TEST": _frame(stock_prior + [-0.059]),
@@ -87,7 +87,7 @@ def test_idiosyncratic_move_produces_robust_residual_z() -> None:
     market_prior = _noisy_market()
     noise = _orthogonal_noise(market_prior)
     stock_prior = [
-        1.5 * value + noise_value for value, noise_value in zip(market_prior, noise)
+        1.5 * value + noise_value for value, noise_value in zip(market_prior, noise, strict=True)
     ]
     frames = {
         "TEST": _frame(stock_prior + [0.02]),
@@ -112,7 +112,7 @@ def test_sector_factor_activates_above_correlation_gate() -> None:
     noise = _orthogonal_noise(market_prior, sector_prior)
     stock_prior = [
         0.5 * market + 2.0 * sector + error
-        for market, sector, error in zip(market_prior, sector_prior, noise)
+        for market, sector, error in zip(market_prior, sector_prior, noise, strict=True)
     ]
     frames = {
         "TEST": _frame(stock_prior + [0.055]),
@@ -141,7 +141,7 @@ def test_low_sector_correlation_falls_back_to_market_model() -> None:
     market_prior = _noisy_market()
     sector_prior = [0.02, 0.02, -0.02, -0.02, 0.01, -0.01] * 10
     noise = [-0.003, 0.001, 0.002, -0.001, 0.003, -0.002] * 10
-    stock_prior = [1.2 * market + error for market, error in zip(market_prior, noise)]
+    stock_prior = [1.2 * market + error for market, error in zip(market_prior, noise, strict=True)]
     frames = {
         "TEST": _frame(stock_prior + [0.012]),
         "IWM": _frame(market_prior + [0.01]),
@@ -163,7 +163,7 @@ def test_low_sector_correlation_falls_back_to_market_model() -> None:
 def test_short_history_and_missing_factor_are_explicit() -> None:
     market_prior = _noisy_market()[:25]
     noise = [-0.003, 0.001, 0.002, -0.001, 0.003] * 5
-    stock_prior = [1.5 * market + error for market, error in zip(market_prior, noise)]
+    stock_prior = [1.5 * market + error for market, error in zip(market_prior, noise, strict=True)]
     frames = {
         "TEST": _frame(stock_prior + [0.01]),
         "IWM": _frame(market_prior + [0.01]),
@@ -242,7 +242,7 @@ def test_signal_and_frame_return_mismatch_is_explicit() -> None:
 def test_batch_consumes_s1_signals_excludes_iwm_and_serializes_finite_values() -> None:
     market_prior = _noisy_market()
     noise = [-0.003, 0.001, 0.002, -0.001, 0.003, -0.002] * 10
-    stock_prior = [1.5 * market + error for market, error in zip(market_prior, noise)]
+    stock_prior = [1.5 * market + error for market, error in zip(market_prior, noise, strict=True)]
     frames = {
         "TEST": _frame(stock_prior + [0.02]),
         "IWM": _frame(market_prior + [-0.04]),

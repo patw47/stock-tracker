@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from market_intelligence.tension_outcomes import iter_episodes, run as run_outcomes
+from market_intelligence.tension_outcomes import iter_episodes
+from market_intelligence.tension_outcomes import run as run_outcomes
 from market_intelligence.tension_signals import (
     TensionSignal,
     append_tension_journal,

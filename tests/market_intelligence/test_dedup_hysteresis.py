@@ -9,11 +9,11 @@ import pytest
 
 from market_intelligence.candidate_alerts import CandidateAlert
 from market_intelligence.dedup_hysteresis import (
+    _DEFAULT_STATE_PATH,
     DedupConfig,
     DedupInputError,
     DedupStateError,
     SuppressionDetail,
-    _DEFAULT_STATE_PATH,
     deduplicate_alerts,
     default_pending_path,
     load_dedup_config,

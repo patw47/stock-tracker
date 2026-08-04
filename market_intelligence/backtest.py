@@ -20,11 +20,11 @@ import argparse
 import json
 import logging
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from statistics import median
-from typing import Callable
 
 import pandas as pd
 

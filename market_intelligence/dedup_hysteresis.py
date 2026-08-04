@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import math
 import os
-from contextlib import contextmanager
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
-from typing import Final, Iterator, Literal
-
-import fcntl
+from typing import Final, Literal
 
 from market_intelligence.candidate_alerts import CandidateAlert, Direction
 from market_intelligence.short_interest import ShortInterestResult
@@ -265,10 +265,8 @@ def save_dedup_state(
         )
         os.replace(temporary, path)
     except OSError as exc:
-        try:
+        with suppress(OSError):
             temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise DedupStateError(f"Unable to save dedup state: {path}") from exc
 
 
@@ -320,10 +318,8 @@ def save_pending_state(
         )
         os.replace(temporary, path)
     except OSError as exc:
-        try:
+        with suppress(OSError):
             temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise DedupStateError(f"Unable to save pending dedup state: {path}") from exc
 
 
