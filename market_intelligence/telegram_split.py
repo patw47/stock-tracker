@@ -20,35 +20,60 @@ import re
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
+# Frontières de découpage. Un en-tête ``<b>…</b>`` et la prose qui le suit forment
+# une unité insécable : la ligne vide qui les sépare n'est plus une frontière
+# candidate, sinon un morceau peut se terminer sur un titre de survivant dont
+# l'explication part dans le message suivant. Restent les vraies ruptures de
+# paragraphe et la ligne de séparation de sections du digest (« ──── »), qui est
+# précisément la frontière que l'on veut : elle sépare deux survivants.
+_BOUNDARY_RE = re.compile(r"(?<!</b>)\n\n+|\n─+\n")
+
 
 def _strip_html_tags(text: str) -> str:
     return _HTML_TAG_RE.sub("", text)
 
 
-def split_telegram_html(text: str, limit: int = 4000) -> list[str]:
-    """Split HTML text into <=limit chunks without orphaning a tag.
+def _blocks(text: str) -> list[str]:
+    """Cut ``text`` on split boundaries, each block keeping its trailing separator.
 
-    Splits on paragraph (``\\n\\n``) boundaries; since each ``<b>`` tag is
-    contained in one paragraph, no chunk cuts a tag. A single oversized paragraph
-    (> limit) is degraded to plain text (tags stripped) then hard-sliced: better a
-    formatting-free alert than an alert Telegram refuses.
+    Garder le séparateur collé au bloc qui le précède rend la concaténation des
+    morceaux exactement égale au texte d'entrée : rien à restaurer, donc rien à
+    perdre — y compris quand deux frontières de nature différente se suivent.
+    """
+    blocks: list[str] = []
+    start = 0
+    for match in _BOUNDARY_RE.finditer(text):
+        blocks.append(text[start : match.end()])
+        start = match.end()
+    blocks.append(text[start:])
+    return blocks
+
+
+def split_telegram_html(text: str, limit: int = 4000) -> list[str]:
+    """Split HTML text into <=limit chunks without orphaning a tag or a title.
+
+    Splits on the boundaries above; since each ``<b>`` tag is contained in one
+    block, no chunk cuts a tag, and no chunk ends on a survivor header without its
+    prose. A single oversized block (> limit) is degraded to plain text (tags
+    stripped) then hard-sliced: better a formatting-free alert than an alert
+    Telegram refuses.
     """
     if len(text) <= limit:
         return [text]
     chunks: list[str] = []
     current = ""
-    for paragraph in re.split(r"\n\n+", text):
-        candidate = f"{current}\n\n{paragraph}" if current else paragraph
+    for block in _blocks(text):
+        candidate = current + block
         if len(candidate) <= limit:
             current = candidate
             continue
         if current:
             chunks.append(current)
             current = ""
-        if len(paragraph) <= limit:
-            current = paragraph
+        if len(block) <= limit:
+            current = block
         else:
-            plain = _strip_html_tags(paragraph)
+            plain = _strip_html_tags(block)
             for start in range(0, len(plain), limit):
                 chunks.append(plain[start : start + limit])
     if current:

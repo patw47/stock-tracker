@@ -541,6 +541,38 @@ def test_split_telegram_html_matches_golden_fixture(case: dict) -> None:
     assert chunks == case["chunks"]
 
 
+@pytest.mark.parametrize(
+    "case", _GOLDEN_SPLIT["cases"], ids=[c["name"] for c in _GOLDEN_SPLIT["cases"]]
+)
+def test_split_telegram_html_loses_nothing(case: dict) -> None:
+    """La concatenation des morceaux reconstitue exactement le texte d'entree.
+
+    Les separateurs de paragraphe ne sont plus retires : ils restent colles au bloc
+    qui les precede, donc la restauration est l'identite. Le cas de degradation en
+    texte brut est exclu par construction — il retire les balises, c'est son role.
+    """
+    text = case["text"]
+    if case["name"] == "paragraphe_surdimensionne":
+        pytest.skip("degradation en texte brut : perte de balises assumee")
+
+    chunks = orchestrator.split_telegram_html(text, _GOLDEN_SPLIT["limit"])
+
+    assert "".join(chunks) == text
+
+
+def test_split_telegram_html_never_orphans_a_survivor_title() -> None:
+    """Epic 9 S4 : un en-tete de survivant et sa prose ne sont jamais separes."""
+    case = next(c for c in _GOLDEN_SPLIT["cases"] if c["name"] == "digest_long")
+
+    chunks = orchestrator.split_telegram_html(case["text"], _GOLDEN_SPLIT["limit"])
+
+    assert len(chunks) > 1  # sinon le test est vrai par vacuite
+    for chunk in chunks:
+        assert not chunk.rstrip().endswith("</b>"), (
+            "un morceau se termine sur un titre sans sa prose"
+        )
+
+
 def _result_with_digest(digest: str) -> orchestrator.EodRunResult:
     return orchestrator.EodRunResult(
         as_of="2026-06-02",
