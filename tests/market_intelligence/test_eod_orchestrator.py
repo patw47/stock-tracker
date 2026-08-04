@@ -268,8 +268,11 @@ def test_journal_record_contains_candidates_detail_and_core_fields(
         "candidates_detail",
         "data_issues",
         "should_send",
+        "digest_chars",
+        "chunk_count",
     }
     assert isinstance(record["candidates_detail"], list) and record["candidates_detail"]
+    assert record["digest_chars"] > 0
 
 
 def test_no_journal_path_writes_nothing(monkeypatch, tmp_path) -> None:
