@@ -741,7 +741,11 @@ def run_eod_anomaly_pipeline(
 
 
 def _run_log_record(result: EodRunResult) -> dict[str, object]:
-    """Project one run into a JSONL journal record (Epic 2)."""
+    """Project one run into a JSONL journal record (Epic 2).
+
+    ``digest_chars``/``chunk_count`` (Epic 9 S3) are measured on every run, dry-run
+    and zero-survivor included, to size the Telegram split before refactoring it.
+    """
     payload = result.to_dict()
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -752,6 +756,8 @@ def _run_log_record(result: EodRunResult) -> dict[str, object]:
         "candidates_detail": payload["candidates_detail"],
         "data_issues": list(result.data_issues),
         "should_send": result.should_send,
+        "digest_chars": len(result.digest),
+        "chunk_count": len(split_telegram_html(result.digest)),
     }
 
 

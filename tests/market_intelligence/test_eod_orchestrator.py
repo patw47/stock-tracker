@@ -515,6 +515,76 @@ def test_split_telegram_html_keeps_bold_balanced_across_chunks() -> None:
         assert chunk.count("<b>") == chunk.count("</b>")  # no orphan tag
 
 
+def _result_with_digest(digest: str) -> orchestrator.EodRunResult:
+    return orchestrator.EodRunResult(
+        as_of="2026-06-02",
+        expected_symbols=(),
+        fetched_symbols=(),
+        candidate_count=0,
+        survivor_count=0,
+        analysis_count=0,
+        should_send=False,
+        digest=digest,
+        data_issues=(),
+        dry_run=True,
+        run_id=None,
+        pending_state_path=None,
+    )
+
+
+def test_journal_record_carries_digest_chars_and_chunk_count() -> None:
+    record = orchestrator._run_log_record(_result_with_digest("hello"))
+
+    assert record["digest_chars"] == 5
+    assert record["chunk_count"] == 1
+
+
+def test_digest_chars_matches_length_of_same_run_digest(monkeypatch) -> None:
+    monkeypatch.delenv("ANOMALY_DEDUP_READONLY", raising=False)
+
+    result = _minimal_pipeline(
+        monkeypatch,
+        deduplicator=lambda decisions, short_interest, *, readonly=False, **_kwargs: (
+            _survivor("AAA"),
+        ),
+        dry_run=True,
+    )
+    record = orchestrator._run_log_record(result)
+
+    # Same object, zero tolerance: digest_chars is not recomputed independently.
+    assert record["digest_chars"] == len(result.digest)
+
+
+def test_chunk_count_above_one_past_the_limit_and_one_below() -> None:
+    long_digest = "\n\n".join(f"<b>{i}</b>\nprose " * 20 for i in range(60))
+    assert len(long_digest) > 4000
+
+    long_record = orchestrator._run_log_record(_result_with_digest(long_digest))
+    short_record = orchestrator._run_log_record(_result_with_digest("short digest"))
+
+    assert long_record["chunk_count"] > 1
+    assert short_record["chunk_count"] == 1
+
+
+def test_zero_survivor_run_still_carries_digest_chars_and_chunk_count(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.delenv("ANOMALY_DEDUP_READONLY", raising=False)
+    journal = tmp_path / "runs.jsonl"
+
+    result = _run_pipeline_with(
+        monkeypatch,
+        {"AAA": _candidate("AAA", is_candidate=False)},
+        lambda d, s, **k: (),
+        journal_path=journal,
+    )
+
+    assert result.digest == ""
+    record = json.loads(journal.read_text(encoding="utf-8").splitlines()[0])
+    assert record["digest_chars"] == 0
+    assert record["chunk_count"] == 1
+
+
 def test_split_telegram_html_degrades_oversized_paragraph_to_plaintext() -> None:
     oversized = "<b>1. AAA</b> " + "x" * 5000  # single paragraph, no \n\n
     chunks = orchestrator.split_telegram_html(oversized, limit=4000)
