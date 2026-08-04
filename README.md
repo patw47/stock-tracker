@@ -296,15 +296,19 @@ epics turned the demo into a system:
    re-fires. Admin tool: `python3 -m market_intelligence.dedup_admin
    show|reset|commit`.
 2. **Observability** — append-only run journal (`runs.jsonl`, one line per run
-   with the exact reason each candidate did not alert), an EOD **watchdog
-   outside n8n** (systemd timer, 22:15 UTC — if n8n dies, the watchdog
-   survives, and alerts through the raw Telegram API), and a Friday heartbeat
-   so weekly silence is bounded by a positive signal. Zero LLM in the whole
-   chain.
+   with the exact reason each candidate did not alert, plus `digest_chars` and
+   `chunk_count` — the rendered digest length and the number of Telegram
+   messages it produces, written on every run including dry-runs and
+   zero-survivor nights), an EOD **watchdog outside n8n** (systemd timer,
+   22:15 UTC — if n8n dies, the watchdog survives, and alerts through the raw
+   Telegram API), and a Friday heartbeat so weekly silence is bounded by a
+   positive signal. Zero LLM in the whole chain.
 3. **Safe delivery** — every value sent to Telegram is HTML-escaped
    producer-side (`parse_mode=HTML`), the 4,000-char splitter never cuts a tag
-   in half, and `Send Telegram` retries ×3 with the final failure kept visible
-   (no `continueOnFail`).
+   in half nor strands a survivor headline away from its prose
+   (`market_intelligence/telegram_split.py`, the single implementation — the
+   n8n Split nodes only relay the chunks Python produced), and `Send Telegram`
+   retries ×3 with the final failure kept visible (no `continueOnFail`).
 4. **Unified ticker referential** — `python3 -m
    market_intelligence.registry_check` is blocking in CI and at deploy time: a
    **portfolio** ticker can no longer be silently invisible to detection.
@@ -385,6 +389,8 @@ stock-tracker/
 ├── portfolio.json             # 8 portfolio tickers (source of truth)
 ├── watchlist.json             # 8 watchlist tickers (source of truth)
 ├── requirements.txt           # Python deps (requests, numpy, pandas, yfinance, pyarrow)
+├── Makefile                   # Verification entrypoints — CI calls these targets, not the tools
+├── .ruff.toml                 # Lint rules, target-version py310 (the VPS system python)
 ├── agents/warren/             # manage_tickers.py — ticker management backing the Telegram skills
 ├── market_intelligence/       # Layer B anomaly detection (S0–S5) + reliability & measurement tooling
 │   ├── eod_orchestrator.py    # Pipeline chief: dry-run flags, run journal, HTML-safe digest
@@ -405,9 +411,10 @@ stock-tracker/
 │   ├── tickerbrief/           # On-demand ticker brief skill spec (SKILL.md)
 │   ├── modifyportfolio/       # Portfolio management via Telegram (with Layer B onboarding)
 │   └── modifywatchlist/       # Watchlist management via Telegram (with Layer B onboarding)
-├── tests/                     # pytest suite — 372 tests (agents, market_intelligence, deploy, workflow wiring)
+├── tests/                     # pytest suite — 397 tests (agents, market_intelligence, deploy, workflow wiring)
 ├── docs/                      # project-structure, deployment, backtest guide, ticker schema
 ├── deploy/                    # CI/CD: remote.sh, import_workflow.py (version publish),
+│                              # deploy_verdict.py (deploy pass/fail, testable off-VPS),
 │                              # watchdog_eod.py + systemd units/timers (watchdog, outcome tracker, v5 bridge)
 └── .github/workflows/         # CI + auto-deploy + Notion sync
 
@@ -705,6 +712,24 @@ curl -s http://localhost:5680/healthz
 
 ---
 
+## Verification targets
+
+CI and the local machine run **the same commands**: `.github/workflows/ci.yml`
+calls the `make` targets, never the tools directly.
+
+```bash
+make test              # full offline pytest suite (397 tests)
+make lint              # ruff check . — rules in .ruff.toml, target-version py310
+make validate-json     # workflow.json + the two *.example.json stay parseable
+make check-referential # registry vs portfolio/watchlist coherence (blocking)
+make test-deploy       # deploy verdict logic, no VPS needed
+```
+
+The CI job reports its QA verdict to Notion from `job.status`, so a run whose
+tests fail can no longer report a green verdict — whatever the other steps did.
+
+---
+
 ## Continuous deployment (GitHub Actions → VPS)
 
 Pushing to `main` auto-deploys to the VPS once CI is green. The deploy job runs on a
@@ -724,7 +749,12 @@ push main → CI green ──► .github/workflows/deploy.yml  (runs-on: self-ho
                                    n8n execute --id  (validation run, as warren, n8n stopped)
                                    start stock-tracker
                                    healthcheck: services + n8n :5680/healthz
-                              → Telegram status message (success / failure + per-service state)
+                                   + the 4 systemd timers and the referential-sync
+                                     path unit must all be `active`
+                                   deploy_verdict.py → ok / fail (fail-closed:
+                                     no verdict at all counts as fail)
+                              → Telegram status message (success / failure, one
+                                indicator per service, timer and path unit)
 ```
 
 See `docs/deployement.md` for the full rationale (self-hosted runner, custom sqlite
