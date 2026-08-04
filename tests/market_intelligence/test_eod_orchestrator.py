@@ -8,9 +8,9 @@ import pandas as pd
 import pytest
 
 import market_intelligence.eod_orchestrator as orchestrator
-from market_intelligence.eod_orchestrator import append_run_log
 from market_intelligence.candidate_alerts import CandidateAlert
 from market_intelligence.dedup_hysteresis import DeduplicatedAlert, SuppressionDetail
+from market_intelligence.eod_orchestrator import append_run_log
 from market_intelligence.registry_schema import Registry, TickerEntry
 from market_intelligence.short_interest import ShortInterestResult
 
@@ -108,11 +108,11 @@ def _minimal_pipeline(monkeypatch, **kwargs):
         "evaluate_candidates",
         lambda *args, **kwargs: {"AAA": _candidate("AAA")},
     )
-    defaults = dict(
-        registry=registry,
-        frame_fetcher=lambda days: _frames(("AAA",)),
-        short_interest_fetcher=lambda source_registry: {"AAA": _short("AAA")},
-    )
+    defaults = {
+        "registry": registry,
+        "frame_fetcher": lambda days: _frames(("AAA",)),
+        "short_interest_fetcher": lambda source_registry: {"AAA": _short("AAA")},
+    }
     defaults.update(kwargs)
     return orchestrator.run_eod_anomaly_pipeline(**defaults)
 

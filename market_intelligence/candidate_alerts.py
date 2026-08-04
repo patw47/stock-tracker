@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Final, Literal
 
 from market_intelligence.anomaly_signals import AnomalySignals
-from market_intelligence.beta_gate import BetaGateResult, RETURN_WINDOW
+from market_intelligence.beta_gate import RETURN_WINDOW, BetaGateResult
 from market_intelligence.registry_schema import load_registry
 
 Classification = Literal["calm", "speculative"]

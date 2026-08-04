@@ -13,9 +13,11 @@ from market_intelligence.candidate_alerts import (
     AlertThresholdConfig,
     CandidateAlert,
     evaluate_all,
-    evaluate_candidate as _evaluate_candidate,
     load_alert_config,
     select_candidates,
+)
+from market_intelligence.candidate_alerts import (
+    evaluate_candidate as _evaluate_candidate,
 )
 from market_intelligence.registry_schema import load_registry
 

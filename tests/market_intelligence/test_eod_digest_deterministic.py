@@ -24,14 +24,15 @@ from market_intelligence.tension_signals import TensionSignal, format_tension_di
 
 
 def _signals(symbol: str, **overrides: object) -> AnomalySignals:
-    base: dict[str, object] = dict(
-        symbol=symbol, as_of="2026-07-17", bar_count=280, short_history=False,
-        fallback_applied=False, return_window=60, volume_window=20, extrema_window=252,
-        daily_return=None, return_median=None, return_mad=None, return_robust_z=None,
-        rvol=None, log_volume_z=None, opening_gap=None, true_range=None, atr14=None,
-        atr_expansion_ratio=None, high_52w=None, low_52w=None,
-        breakout_high_52w=None, breakout_low_52w=None, data_issues=(),
-    )
+    base: dict[str, object] = {
+        "symbol": symbol, "as_of": "2026-07-17", "bar_count": 280, "short_history": False,
+        "fallback_applied": False, "return_window": 60, "volume_window": 20,
+        "extrema_window": 252, "daily_return": None, "return_median": None,
+        "return_mad": None, "return_robust_z": None, "rvol": None, "log_volume_z": None,
+        "opening_gap": None, "true_range": None, "atr14": None,
+        "atr_expansion_ratio": None, "high_52w": None, "low_52w": None,
+        "breakout_high_52w": None, "breakout_low_52w": None, "data_issues": (),
+    }
     base.update(overrides)
     return AnomalySignals(**base)  # type: ignore[arg-type]
 

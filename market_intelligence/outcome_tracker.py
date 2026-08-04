@@ -4,10 +4,10 @@ import argparse
 import fcntl
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 

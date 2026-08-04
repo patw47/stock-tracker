@@ -86,7 +86,8 @@ def send(text: str, keyboard: list | None = None) -> dict | None:
 def _load(path: str) -> dict:
     if not os.path.exists(path):
         return {"tickers": []}
-    data = json.load(open(path, encoding="utf-8"))
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
     if not isinstance(data, dict) or not isinstance(data.get("tickers"), list):
         raise SystemExit(f"ERROR: {path} is not in {{'tickers':[...]}} shape")
     return data

@@ -20,11 +20,11 @@ import sys
 from pathlib import Path
 
 from market_intelligence.dedup_hysteresis import (
+    _DEFAULT_STATE_PATH,
+    _REPO_ROOT,
     DedupStateError,
     TickerDedupState,
-    _DEFAULT_STATE_PATH,
     _pending_path_for,
-    _REPO_ROOT,
     _state_lock,
     load_dedup_state,
     load_pending_state,

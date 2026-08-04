@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-
 from market_intelligence.registry_schema import QuarantineEntry, TickerEntry
-from market_intelligence.symbol_validator import validate_ticker, run_validation
+from market_intelligence.symbol_validator import run_validation, validate_ticker
 
 
 def _ticker_mock(info: dict) -> MagicMock:

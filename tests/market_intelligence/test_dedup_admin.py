@@ -7,9 +7,9 @@ import pytest
 
 from market_intelligence.dedup_admin import _resolve_state_path, main
 from market_intelligence.dedup_hysteresis import (
-    _pending_path_for,
     _REPO_ROOT,
     TickerDedupState,
+    _pending_path_for,
     load_dedup_state,
     save_dedup_state,
     save_pending_state,
