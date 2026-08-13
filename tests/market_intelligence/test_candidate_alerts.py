@@ -357,7 +357,31 @@ def test_batch_reports_missing_inputs_and_selects_only_candidates() -> None:
     assert "NaN" not in json.dumps(decisions["MISSING"].to_dict())
 
 
-def test_default_config_matches_s0_registry_and_spec_thresholds() -> None:
+def test_classifications_cover_exactly_the_registry(tmp_path, monkeypatch) -> None:
+    """Chaque ticker de portefeuille a une classification, et aucune n'est orpheline.
+
+    L'état est posé par le test depuis l'Epic 10 S4 : registre et classifications
+    ont quitté git, la CI n'en a aucun, et un test qui lirait la machine passerait
+    au vert sur un état vide sans rien prouver.
+    """
+    from market_intelligence import registry_check
+
+    symbols = ["XYL", "MMED", "RGTI"]
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps({"portfolio_tickers": [
+            {"symbol": s, "api_symbol": s, "expected_name": f"{s} Inc"} for s in symbols
+        ]}),
+        encoding="utf-8",
+    )
+    classifications = tmp_path / "classifications.json"
+    classifications.write_text(
+        json.dumps({"classifications": {"XYL": "calm", "MMED": "calm", "RGTI": "speculative"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(registry_check, "REGISTRY_PATH", registry)
+    monkeypatch.setattr(registry_check, "CLASSIFICATIONS_PATH", classifications)
+
     config = load_alert_config()
     portfolio = {entry.symbol for entry in load_registry().portfolio_tickers}
 
@@ -365,6 +389,12 @@ def test_default_config_matches_s0_registry_and_spec_thresholds() -> None:
     assert config.classifications["XYL"] == "calm"
     assert config.classifications["MMED"] == "calm"
     assert config.classifications["RGTI"] == "speculative"
+
+
+def test_default_config_matches_spec_thresholds() -> None:
+    """Les seuils restent versionnés : cette garde-là survit à la sortie de l'état."""
+    config = load_alert_config()
+
     assert config.calm_residual_z == pytest.approx(2.0)
     assert config.speculative_residual_z == pytest.approx(2.5)
     assert config.volume_z == pytest.approx(2.5)

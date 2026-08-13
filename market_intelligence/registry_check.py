@@ -12,6 +12,11 @@ DATA_DIR = Path(__file__).parent / "data"
 # is supposed to restore exactly these.
 ALERT_THRESHOLDS_PATH = DATA_DIR / "alert_thresholds.json"
 SECTOR_FACTORS_PATH = DATA_DIR / "sector_factors.json"
+# The registry is split the same way, along the same line: the macro tickers, the
+# beta-gate factor ETFs and the API alias map are structural decisions — and the
+# bridge never rebuilds them, so a fresh machine would lose them for good if they
+# left git with the rest.
+REGISTRY_CONFIG_PATH = DATA_DIR / "registry_config.json"
 
 # Execution state — follows the cohort since Epic 10 S2, so it changes every day
 # and has no place in git: a deploy would destroy it, which is why an automatic
@@ -19,7 +24,7 @@ SECTOR_FACTORS_PATH = DATA_DIR / "sector_factors.json"
 # like watchlist.json and portfolio.json before it. This module is the single
 # place that resolves these paths — readers follow by importing them.
 STATE_DIR = REPO_ROOT / "runtime" / "referential"
-REGISTRY_PATH = STATE_DIR / "registry.json"
+REGISTRY_PATH = STATE_DIR / "registry.json"  # portfolio_tickers only
 CLASSIFICATIONS_PATH = STATE_DIR / "classifications.json"
 SINGLE_FACTORS_PATH = STATE_DIR / "single_factor_symbols.json"
 
@@ -166,9 +171,24 @@ def run_check(portfolio_path: Path | None = None, watchlist_path: Path | None = 
 
     Returns 1 if any blocking incoherence is found, else 0. Prints one line per
     problem naming the file to fix.
+
+    A machine with **no state file at all** has nothing to check yet (Epic 10 S4):
+    the state is rebuilt by the first bridge run, and that is the normal first boot
+    — CI included, since the state left git. Blocking a deploy on it would rebuild
+    the very failure mode this epic removes. An existing but incoherent state is
+    still blocking: the guard is skipped only when the state does not exist.
     """
     portfolio_path = portfolio_path or _resolve_runtime_path("portfolio")
     watchlist_path = watchlist_path or _resolve_runtime_path("watchlist")
+
+    if not any(
+        p.exists() for p in (REGISTRY_PATH, CLASSIFICATIONS_PATH, SINGLE_FACTORS_PATH)
+    ):
+        print(
+            f"registry_check: aucun état de référentiel sous {STATE_DIR} — "
+            "rien à vérifier (il sera reconstruit au premier passage du pont)."
+        )
+        return 0
 
     runtime = {
         portfolio_path.name: load_runtime_symbols(portfolio_path),

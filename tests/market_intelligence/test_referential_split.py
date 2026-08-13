@@ -82,6 +82,27 @@ def test_a_machine_without_state_loads_config_and_reads_empty(bare_machine):
     ) == set()
 
 
+def test_check_referential_passes_on_a_bare_machine_but_still_guards_a_real_one(
+    bare_machine, tmp_path, capsys
+):
+    """Sans état : rien à vérifier, exit 0. Avec un état incohérent : toujours bloquant."""
+    portfolio = tmp_path / "portfolio.json"
+    portfolio.write_text(json.dumps({"tickers": [{"symbol": "BBAI"}]}), encoding="utf-8")
+    watchlist = tmp_path / "watchlist.json"
+    watchlist.write_text(json.dumps({"tickers": []}), encoding="utf-8")
+
+    assert registry_check.run_check(portfolio, watchlist) == 0
+    assert "aucun état de référentiel" in capsys.readouterr().out
+
+    # Le garde-fou n'a pas disparu : un état PRÉSENT mais incohérent reste bloquant.
+    registry_check.REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    registry_check.REGISTRY_PATH.write_text(
+        json.dumps({"portfolio_tickers": []}), encoding="utf-8"
+    )
+    assert registry_check.run_check(portfolio, watchlist) == 1
+    assert "BBAI" in capsys.readouterr().out
+
+
 def test_a_reconciliation_rebuilds_the_state_from_nothing(bare_machine, tmp_path):
     """Premier passage du pont sur une machine nue : l'état se reconstruit."""
     watchlist = tmp_path / "watchlist.json"

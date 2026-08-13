@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from market_intelligence import registry_check
 from market_intelligence.registry_check import BLOCKING, INFO, Issue, evaluate
 
@@ -87,12 +89,44 @@ def _write(path: Path, symbols: list[str]) -> None:
     path.write_text(json.dumps({"tickers": [{"symbol": s} for s in symbols]}), encoding="utf-8")
 
 
-def test_run_check_repo_examples_passe():
+@pytest.fixture
+def state(tmp_path, monkeypatch):
+    """Un état de référentiel temporaire couvrant BBAI et HIMS.
+
+    Depuis l'Epic 10 S4 l'état a quitté git : ces tests ne peuvent plus dépendre du
+    contenu de la machine — la CI n'en a aucun, et `run_check` y sortirait 0 par
+    « rien à vérifier ». Ils posent donc l'état qu'ils testent.
+    """
+    example = json.loads(
+        (registry_check.REPO_ROOT / "portfolio.example.json").read_text(encoding="utf-8")
+    )
+    covered = [t["symbol"] for t in example["tickers"]]
+    files = {
+        "REGISTRY_PATH": ("registry.json", {
+            "portfolio_tickers": [
+                {"symbol": s, "api_symbol": s, "expected_name": f"{s} Inc"} for s in covered
+            ],
+        }),
+        "CLASSIFICATIONS_PATH": ("classifications.json", {
+            "classifications": {s: "speculative" for s in covered},
+        }),
+        "SINGLE_FACTORS_PATH": ("single_factor_symbols.json", {
+            "single_factor_symbols": covered,
+        }),
+    }
+    for attr, (name, payload) in files.items():
+        path = tmp_path / name
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.setattr(registry_check, attr, path)
+    return tmp_path
+
+
+def test_run_check_repo_examples_passe(state):
     # Sans arguments → résout portfolio.json|.example + watchlist.json|.example du repo.
     assert registry_check.run_check() == 0
 
 
-def test_run_check_exit_non_zero_si_divergence(tmp_path, capsys):
+def test_run_check_exit_non_zero_si_divergence(state, tmp_path, capsys):
     portfolio = tmp_path / "portfolio.json"
     watchlist = tmp_path / "watchlist.json"
     _write(portfolio, ["FAKE_TICKER"])   # diverge : inconnu partout → bloquant
@@ -107,7 +141,7 @@ def test_run_check_exit_non_zero_si_divergence(tmp_path, capsys):
     assert "registry.json" in out
 
 
-def test_run_check_watchlist_hors_registre_ne_bloque_pas(tmp_path, capsys):
+def test_run_check_watchlist_hors_registre_ne_bloque_pas(state, tmp_path, capsys):
     # Le cas VPS réel : watchlist massive hors registre → tier tension, exit 0.
     portfolio = tmp_path / "portfolio.json"
     watchlist = tmp_path / "watchlist.json"
@@ -122,7 +156,7 @@ def test_run_check_watchlist_hors_registre_ne_bloque_pas(tmp_path, capsys):
     assert "tension" in out
 
 
-def test_run_check_exit_zero_si_runtime_coherent(tmp_path):
+def test_run_check_exit_zero_si_runtime_coherent(state, tmp_path):
     # Un sous-ensemble strict des tickers réels du repo reste cohérent.
     portfolio = tmp_path / "portfolio.json"
     watchlist = tmp_path / "watchlist.json"
@@ -131,7 +165,7 @@ def test_run_check_exit_zero_si_runtime_coherent(tmp_path):
     assert registry_check.run_check(portfolio, watchlist) == 0
 
 
-def test_main_retourne_exit_code(tmp_path):
+def test_main_retourne_exit_code(state, tmp_path):
     portfolio = tmp_path / "portfolio.json"
     watchlist = tmp_path / "watchlist.json"
     _write(portfolio, ["INCONNU"])
