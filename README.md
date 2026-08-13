@@ -253,10 +253,16 @@ in forward validation.
   journal on every run: tracked and `days_held < 63` → in the watchlist;
   `days_held >= 63` (the v5 judgment horizon) or gone from the journal → out.
   Idempotent, so a missed run costs nothing.
-- **Watchlist only, never Layer B** — entries are written through the atomic
-  helpers of `agents/warren/manage_tickers.py`; registry onboarding stays a human
-  decision in a PR. The ticker is covered by the tension tier the same evening
-  and `registry_check` reports it as `info`, never blocking.
+- **The referential follows the cohort** (Epic 10 S2) — what the reconciliation
+  adds is onboarded (`registry.json` entry, `speculative` classification,
+  `single_factor` coverage) and what it removes is offboarded, reusing
+  `ticker_onboard.py` as it is. Nothing is offboarded while the symbol still sits
+  in a runtime list, so **portfolio tickers are structurally protected** — the
+  same guard the Telegram remove flow applies. Validating a symbol is a network
+  call: a failure is a logged skip for that symbol alone, counted in the run
+  summary (`onboarded` / `offboarded` / `skipped` / `failed`), never an exception
+  that sinks the ones after it. Before this, 86 % of the alert universe sat
+  outside the cohort: 165 registry tickers for 23 live ones.
 - **Provenance `source: "smallcaps-v5"`** — the bridge removes **only** its own
   entries. A ticker added via Telegram is untouchable (safety rule #1).
 - **Cap of 150** bridged tickers, with an explicit log line listing the excluded

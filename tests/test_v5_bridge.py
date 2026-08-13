@@ -3,13 +3,91 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from urllib.error import URLError
 
 import pytest
 
-from market_intelligence import v5_bridge
+from market_intelligence import ticker_onboard, v5_bridge
 
 MANUAL = {"symbol": "NVDA", "added": "2026-01-05"}  # Telegram add: untouchable
+
+
+@dataclass(frozen=True)
+class _FakeValidation:
+    status: str
+    actual_name: str = ""
+    reason: str = ""
+
+
+@pytest.fixture(autouse=True)
+def referentials(tmp_path, monkeypatch):
+    """Point the Layer B referentials at tmp_path and stub symbol validation.
+
+    AUTOUSE on purpose: since Epic 10 S2 a reconciliation writes the registry and
+    validates symbols over the network. Left to their defaults, every test in this
+    file would hit yfinance and edit the committed market_intelligence/data files.
+    """
+    seeds = {
+        "REGISTRY_PATH": ("registry.json", {
+            "portfolio_tickers": [], "macro_tickers": [], "factor_tickers": [], "alias_map": {},
+        }),
+        "ALERT_THRESHOLDS_PATH": ("alert_thresholds.json", {
+            "thresholds": {"volume_z": 2.5}, "classifications": {},
+        }),
+        "SECTOR_FACTORS_PATH": ("sector_factors.json", {
+            "market_factor": "IWM", "sector_factors": {}, "single_factor_symbols": [],
+        }),
+    }
+    for attr, (name, seed) in seeds.items():
+        path = tmp_path / name
+        path.write_text(json.dumps(seed), encoding="utf-8")
+        monkeypatch.setattr(v5_bridge, attr, path)
+    # An empty portfolio by default: nothing held, so nothing protected. The
+    # `portfolio` fixture overwrites it for the tests that need holdings.
+    (tmp_path / "portfolio.json").write_text('{"tickers": []}', encoding="utf-8")
+    monkeypatch.setattr(v5_bridge, "PORTFOLIO_PATH", tmp_path / "portfolio.json")
+    monkeypatch.setattr(
+        ticker_onboard, "_validate_symbol",
+        lambda sym: _FakeValidation(status="ok", actual_name=f"{sym} Inc"),
+    )
+
+    class _Referentials:
+        registry = tmp_path / "registry.json"
+        thresholds = tmp_path / "alert_thresholds.json"
+        factors = tmp_path / "sector_factors.json"
+
+        def symbols(self) -> set[str]:
+            data = json.loads(self.registry.read_text(encoding="utf-8"))
+            return {t["symbol"] for t in data["portfolio_tickers"]}
+
+        def classifications(self) -> dict:
+            return json.loads(self.thresholds.read_text(encoding="utf-8"))["classifications"]
+
+        def factor_covered(self) -> set[str]:
+            data = json.loads(self.factors.read_text(encoding="utf-8"))
+            return set(data["sector_factors"]) | set(data["single_factor_symbols"])
+
+    return _Referentials()
+
+
+@pytest.fixture
+def portfolio(referentials, tmp_path):
+    """A temporary portfolio.json; the list that protects its tickers.
+
+    Depends on ``referentials`` so it always runs after it and its holdings win.
+    """
+    path = tmp_path / "portfolio.json"
+
+    def _write(*symbols: str):
+        path.write_text(
+            json.dumps({"tickers": [{"symbol": s} for s in symbols]}), encoding="utf-8"
+        )
+        return path
+
+    _write.path = path
+    _write()
+    return _write
 
 
 def _payload(*rows: tuple[str, int, int], scanned_at: str = "2026-08-04T20:40:00Z") -> dict:
@@ -317,6 +395,85 @@ def test_snapshot_without_scanned_at_never_overwrites_a_guarded_watchlist(
 
     assert result["added"] == [] and "not newer" in result["anomalies"][0]
     assert _digest(watchlist.path) == before
+
+
+# 6ter. le référentiel suit la cohorte (Epic 10 S2) -------------------------
+
+def test_added_symbol_gets_registry_classification_and_factor(watchlist, referentials):
+    result = _reconcile(_payload(("ATNF", 14, 3)), watchlist)
+
+    assert result["added"] == ["ATNF"]
+    assert "ATNF" in referentials.symbols()
+    assert referentials.classifications()["ATNF"] == "speculative"
+    assert "ATNF" in referentials.factor_covered()
+    assert result["referential"]["onboarded"] == 1
+
+
+def _seed(referentials, *symbols: str) -> None:
+    """Onboard symbols the way the Telegram add flow already does."""
+    for symbol in symbols:
+        ticker_onboard.onboard_ticker(
+            symbol,
+            registry_path=referentials.registry,
+            thresholds_path=referentials.thresholds,
+            factors_path=referentials.factors,
+        )
+
+
+def test_portfolio_ticker_is_never_offboarded(watchlist, portfolio, referentials):
+    """Artefact : les symboles de portefeuille classés ; invariant : ensemble identique."""
+    held = {"HELD"}
+    portfolio(*held)
+    _seed(referentials, "HELD")
+    watchlist.write([{"symbol": "HELD", "added": "2026-05-01", "source": "smallcaps-v5"}])
+    before = set(referentials.classifications()) & held
+    assert before == held
+
+    # HELD sort de la cohorte, mais reste détenu : la watchlist le lâche, pas le
+    # référentiel — sinon la détection d'anomalie cesse sur un titre en portefeuille.
+    result = v5_bridge.reconcile({"SNTI": 2}, watchlist_path=watchlist.path,
+                                 portfolio_path=portfolio.path)
+
+    assert result["removed"] == ["HELD"] and watchlist.symbols() == ["SNTI"]
+    assert set(referentials.classifications()) & held == before  # tolérance nulle
+    assert held <= referentials.symbols() and held <= referentials.factor_covered()
+
+
+def test_one_failing_validation_never_sinks_the_others(
+    watchlist, referentials, monkeypatch, caplog
+):
+    """Isolation réseau : un symbole en échec est un saut journalisé, pas une exception."""
+    def _flaky(symbol):
+        if symbol == "BOOM":
+            raise OSError("yfinance timeout")
+        return _FakeValidation(status="ok", actual_name=f"{symbol} Inc")
+
+    monkeypatch.setattr(ticker_onboard, "_validate_symbol", _flaky)
+
+    with caplog.at_level("ERROR"):
+        result = _reconcile(_payload(("AAA", 14, 3), ("BOOM", 14, 3), ("ZZZ", 14, 3)),
+                            watchlist)
+
+    assert result["added"] == ["AAA", "BOOM", "ZZZ"]  # la watchlist, elle, converge
+    assert referentials.symbols() == {"AAA", "ZZZ"}
+    assert result["referential"] == {"onboarded": 2, "offboarded": 0, "skipped": 0,
+                                     "failed": 1}
+    assert "onboarding BOOM failed" in caplog.text
+
+
+def test_registry_equals_cohort_union_portfolio(watchlist, portfolio, referentials):
+    portfolio("HELD")
+    watchlist.write([{"symbol": "OLD", "added": "2026-05-01", "source": "smallcaps-v5"}])
+    _seed(referentials, "OLD", "HELD")  # état de départ cohérent
+
+    v5_bridge.reconcile({"ATNF": 3, "SNTI": 2}, watchlist_path=watchlist.path,
+                        portfolio_path=portfolio.path)
+
+    cohort = set(watchlist.symbols())
+    assert cohort == {"ATNF", "SNTI"}
+    assert referentials.symbols() == cohort | {"HELD"}
+    assert set(referentials.classifications()) == cohort | {"HELD"}
+    assert referentials.factor_covered() == cohort | {"HELD"}
 
 
 # 7. cap reached ------------------------------------------------------------

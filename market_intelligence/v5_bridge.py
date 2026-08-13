@@ -17,8 +17,10 @@ and the bridge reads that file. Only a snapshot strictly newer than the one
 already applied is acted upon — replaying an old one would remove every ticker
 qualified since.
 
-Layer B (registry, classification, sector factors) is deliberately NOT touched:
-that stays a human decision in a PR.
+Layer B (registry, classification, sector factors) follows the cohort since Epic
+10 S2: whatever the reconciliation adds is onboarded, whatever it removes is
+offboarded — but only when the symbol is gone from BOTH runtime lists, so
+portfolio tickers are structurally protected.
 """
 from __future__ import annotations
 
@@ -31,7 +33,18 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 from agents.warren.manage_tickers import _load, _save, _today
-from market_intelligence.registry_check import REPO_ROOT
+from market_intelligence.registry_check import (
+    ALERT_THRESHOLDS_PATH,
+    REGISTRY_PATH,
+    REPO_ROOT,
+    SECTOR_FACTORS_PATH,
+)
+from market_intelligence.ticker_onboard import (
+    ALREADY_PRESENT,
+    ONBOARDED,
+    offboard_ticker,
+    onboard_ticker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +53,9 @@ logger = logging.getLogger(__name__)
 # not touch a fixture — nor create the runtime file, which would shadow the
 # example for the whole pipeline. Absent file = logged no-op.
 WATCHLIST_PATH = REPO_ROOT / "watchlist.json"
+# Same rule for the portfolio: the runtime file only. It is read, never written —
+# it is the list that protects its tickers from being offboarded.
+PORTFOLIO_PATH = REPO_ROOT / "portfolio.json"
 SOURCE_TAG = "smallcaps-v5"
 HORIZON_DAYS = 63  # v5 judgment horizon: a bridged ticker leaves at days_held >= 63
 DEFAULT_CAP = 150
@@ -181,25 +197,105 @@ def fetch_payload(
         return None
 
 
+def _portfolio_symbols(portfolio_path: str | os.PathLike | None) -> set[str] | None:
+    """Symbols held in the portfolio; ``None`` when the list cannot be read.
+
+    ``None`` is not an empty portfolio: it means "I don't know what is held", and
+    the caller must then offboard nothing. Treating an unreadable list as empty
+    would strip the referentials of every held ticker on a transient glitch.
+    """
+    path = Path(portfolio_path or PORTFOLIO_PATH)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {str(t.get("symbol", "")).strip().upper() for t in data["tickers"]}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        logger.error("v5 bridge: portfolio %s unreadable (%s) - no offboarding", path, exc)
+        return None
+
+
+def sync_referential(
+    added: list[str],
+    removed: list[str],
+    *,
+    watchlist_symbols: set[str],
+    portfolio_path: str | os.PathLike | None = None,
+) -> dict[str, int]:
+    """Mirror the cohort into the Layer B referentials, one symbol at a time.
+
+    ``onboard_ticker`` / ``offboard_ticker`` are reused as they are: default
+    classification, factor coverage and symbol validation stay theirs. Nothing is
+    offboarded while the symbol still sits in a runtime list — the same guard the
+    Telegram remove flow applies, so portfolio tickers are structurally safe.
+
+    Fail-soft per symbol: validating a symbol is a network call, and dozens run
+    back to back 45 minutes before the EOD run. A failure is a logged skip for
+    that symbol alone, never an exception that sinks the ones after it.
+    """
+    paths = {
+        "registry_path": Path(REGISTRY_PATH),
+        "thresholds_path": Path(ALERT_THRESHOLDS_PATH),
+        "factors_path": Path(SECTOR_FACTORS_PATH),
+    }
+    counts = {"onboarded": 0, "offboarded": 0, "skipped": 0, "failed": 0}
+
+    for symbol in added:
+        try:
+            result = onboard_ticker(symbol, **paths)
+        except Exception as exc:  # noqa: BLE001 - network/IO of one symbol only
+            logger.error("v5 bridge: onboarding %s failed (%s) - skipped", symbol, exc)
+            counts["failed"] += 1
+            continue
+        if result.status == ONBOARDED:
+            counts["onboarded"] += 1
+        elif result.status == ALREADY_PRESENT:
+            counts["skipped"] += 1
+        else:
+            logger.warning("v5 bridge: onboarding %s refused (%s)", symbol, result.reason)
+            counts["failed"] += 1
+
+    held = _portfolio_symbols(portfolio_path)
+    for symbol in removed:
+        if held is None or symbol in watchlist_symbols or symbol in held:
+            counts["skipped"] += 1
+            continue
+        try:
+            offboard_ticker(symbol, **paths)
+        except Exception as exc:  # noqa: BLE001 - one symbol never sinks the run
+            logger.error("v5 bridge: offboarding %s failed (%s) - skipped", symbol, exc)
+            counts["failed"] += 1
+            continue
+        counts["offboarded"] += 1
+
+    return counts
+
+
 def _result(
     added: list[str],
     removed: list[str],
     unchanged: int,
     anomalies: list[str],
+    referential: dict[str, int] | None = None,
 ) -> dict:
     """Log the run summary line and return it (orchestrator log style)."""
+    referential = referential or {"onboarded": 0, "offboarded": 0, "skipped": 0, "failed": 0}
     logger.info(
-        "v5 bridge run complete: added=%d removed=%d unchanged=%d anomalies=%d",
+        "v5 bridge run complete: added=%d removed=%d unchanged=%d anomalies=%d "
+        "onboarded=%d offboarded=%d skipped=%d failed=%d",
         len(added),
         len(removed),
         unchanged,
         len(anomalies),
+        referential["onboarded"],
+        referential["offboarded"],
+        referential["skipped"],
+        referential["failed"],
     )
     return {
         "added": added,
         "removed": removed,
         "unchanged": unchanged,
         "anomalies": anomalies,
+        "referential": referential,
     }
 
 
@@ -208,6 +304,7 @@ def reconcile(
     *,
     scanned_at: datetime | None = None,
     watchlist_path: str | os.PathLike | None = None,
+    portfolio_path: str | os.PathLike | None = None,
     cap: int = DEFAULT_CAP,
 ) -> dict:
     """Converge the watchlist toward the target state derived from ``tracked``."""
@@ -252,7 +349,8 @@ def reconcile(
     candidates = sorted(keep - present)
     added, excluded = candidates[:room], candidates[room:]
 
-    anomalies = []
+    anomalies: list[str] = []
+    referential = None
     if excluded:
         anomaly = f"cap of {cap} bridged tickers reached, excluded: {', '.join(excluded)}"
         logger.warning("v5 bridge: %s", anomaly)
@@ -274,8 +372,16 @@ def reconcile(
         if scanned_at is not None:
             data[SCANNED_AT_KEY] = scanned_at.isoformat()
         _save(str(path), data)
+        # The referential follows the cohort (Epic 10 S2). After the write, so a
+        # symbol kept by a manual entry sharing the symbol still counts as present.
+        referential = sync_referential(
+            added,
+            removed,
+            watchlist_symbols={_symbol(t) for t in data["tickers"]},
+            portfolio_path=portfolio_path,
+        )
 
-    return _result(added, removed, len(keep & present), anomalies)
+    return _result(added, removed, len(keep & present), anomalies, referential)
 
 
 def run(
@@ -283,6 +389,7 @@ def run(
     api_url: str | None = None,
     snapshot_path: str | os.PathLike | None = None,
     watchlist_path: str | os.PathLike | None = None,
+    portfolio_path: str | os.PathLike | None = None,
     cap: int = DEFAULT_CAP,
 ) -> dict:
     """Read the scan snapshot and reconcile the watchlist with its v5 journal."""
@@ -296,6 +403,7 @@ def run(
         tracked,
         scanned_at=_scanned_at(payload),
         watchlist_path=watchlist_path,
+        portfolio_path=portfolio_path,
         cap=cap,
     )
 
