@@ -8,7 +8,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).parent.parent
-_REGISTRY_PATH = _REPO_ROOT / "market_intelligence" / "data" / "registry.json"
+# The registry is execution state since Epic 10 S4 — registry_check resolves where
+# it lives, this module only follows. Quarantine stays configuration (a human
+# decision to stop trusting a symbol), so it stays versioned in data/.
 _QUARANTINE_PATH = _REPO_ROOT / "market_intelligence" / "data" / "quarantine.json"
 
 
@@ -57,10 +59,17 @@ def _parse_ticker(raw: dict[str, str]) -> TickerEntry:
 
 
 def load_registry() -> Registry:
-    """Load the canonical ticker registry from market_intelligence/data/registry.json."""
-    raw = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
-    portfolio = tuple(_parse_ticker(t) for t in raw["portfolio_tickers"])
-    macro = tuple(_parse_ticker(t) for t in raw["macro_tickers"])
+    """Load the canonical ticker registry from its runtime location.
+
+    An absent file is an empty registry, not a crash: on a fresh machine the state
+    has not been rebuilt yet (Epic 10 S4). Every list is then empty, so nothing is
+    fetched and nothing alerts — the first bridge run repopulates it.
+    """
+    from market_intelligence.registry_check import REGISTRY_PATH, load_state
+
+    raw = load_state(REGISTRY_PATH)
+    portfolio = tuple(_parse_ticker(t) for t in raw.get("portfolio_tickers", []))
+    macro = tuple(_parse_ticker(t) for t in raw.get("macro_tickers", []))
     factor = tuple(_parse_ticker(t) for t in raw.get("factor_tickers", []))
     alias_map: dict[str, str] = raw.get("alias_map", {})
     logger.debug(

@@ -49,11 +49,32 @@ Three supported paths — all converge on the same JSON files:
    `portfolio.example.json` / `watchlist.example.json` are.
 
 Layer B (`market_intelligence/`) does not read these files directly: it uses
-`data/registry.json` (symbol → api_symbol → expected_name) plus
+`runtime/referential/registry.json` (symbol → api_symbol → expected_name) plus
 `data/quarantine.json` so analysis never runs on a wrong or ambiguous ticker.
-Add a **portfolio** ticker → also add its registry entry (and sector ETF
-mapping in `data/sector_factors.json` if relevant) — `registry_check` blocks
-the deploy otherwise.
+
+**Where each half lives (Epic 10 S4).** The referential is split *inside* its
+files, along one line: what is **decided** stays in git, what **follows the
+cohort** does not.
+
+| Half | Files | Versioned? | Who writes it |
+|---|---|---|---|
+| Configuration | `data/alert_thresholds.json` (thresholds), `data/sector_factors.json` (market factor, correlation threshold, sector ETF map), `data/dedup_thresholds.json`, `data/short_interest_thresholds.json`, `data/quarantine.json` | yes | a human, in a PR |
+| State | `runtime/referential/registry.json`, `runtime/referential/classifications.json`, `runtime/referential/single_factor_symbols.json` | **no** (gitignored) | the v5 bridge, every run |
+
+The state half follows the cohort since Epic 10 S2, so it changes daily: keeping
+it in git meant a deploy `git reset --hard` destroyed it, which is why an
+automatic commit had to exist at all. `market_intelligence/registry_check.py`
+resolves both halves — readers follow by importing its constants, and nothing
+else needs to know where the files sit.
+
+`make check-config-invariant` locks the configuration half against accidental
+rewriting: an automatic path (onboarding, offboarding, bridge sync) may never
+change a threshold or a sector mapping. A deliberate change is made in a PR, then
+the reference is regenerated with `--update`.
+
+Add a **portfolio** ticker → its registry entry follows automatically; a sector
+ETF mapping in `data/sector_factors.json` remains a PR decision if relevant.
+`registry_check` blocks the deploy on an incoherence.
 
 **Watchlist safety net (tension tier).** The EOD orchestrator also reads
 `watchlist.json` directly (`_load_watchlist_symbols`): any entry **not yet in

@@ -1,0 +1,9 @@
+{
+  "sha256": "c07bc4bac6d94286cf5955dab224d8c2cf5059cdc8b080251554b4647b578aeb",
+  "covers": [
+    "alert_thresholds.thresholds",
+    "sector_factors.correlation_threshold",
+    "sector_factors.market_factor",
+    "sector_factors.sector_factors"
+  ]
+}

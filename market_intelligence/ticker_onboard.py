@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from market_intelligence.registry_check import (
-    ALERT_THRESHOLDS_PATH,
+    CLASSIFICATIONS_PATH,
     REGISTRY_PATH,
     SECTOR_FACTORS_PATH,
+    SINGLE_FACTORS_PATH,
+    load_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,7 +51,13 @@ def _validate_symbol(symbol: str):
 
 
 def _atomic_write_json(path: Path, data: dict) -> None:
-    """Write JSON to path atomically, preserving the pretty 2-space layout."""
+    """Write JSON to path atomically, preserving the pretty 2-space layout.
+
+    Creates the parent directory: the state tree does not exist on a machine that
+    has never run the bridge (Epic 10 S4), and rebuilding it is exactly what the
+    first run is for.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
@@ -59,8 +67,9 @@ def onboard_ticker(
     symbol: str,
     *,
     registry_path: Path = REGISTRY_PATH,
-    thresholds_path: Path = ALERT_THRESHOLDS_PATH,
-    factors_path: Path = SECTOR_FACTORS_PATH,
+    classifications_path: Path = CLASSIFICATIONS_PATH,
+    single_factors_path: Path = SINGLE_FACTORS_PATH,
+    sector_factors_path: Path = SECTOR_FACTORS_PATH,
 ) -> OnboardResult:
     """Generate the missing Layer B entries for a new symbol, with safe defaults.
 
@@ -69,6 +78,11 @@ def onboard_ticker(
     classification and a ``single_factor_symbols`` entry are created if missing —
     never a guessed sector-factor mapping. Idempotent: an already-covered symbol
     leaves every file untouched.
+
+    Writes only to state (Epic 10 S4): the registry, the classification table and
+    the single-factor list. ``sector_factors_path`` is read to know whether the
+    symbol already has an ETF mapping, and is never written — that mapping is
+    configuration, chosen in a PR.
     """
     sym = symbol.strip().upper()
     if not sym:
@@ -83,14 +97,15 @@ def onboard_ticker(
         )
     expected_name = validation.actual_name
 
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    thresholds = json.loads(thresholds_path.read_text(encoding="utf-8"))
-    factors = json.loads(factors_path.read_text(encoding="utf-8"))
+    registry = load_state(registry_path)
+    thresholds = load_state(classifications_path)
+    factors = load_state(single_factors_path)
+    sector_map = json.loads(sector_factors_path.read_text(encoding="utf-8"))
 
     registry_symbols = {t["symbol"] for t in registry.get("portfolio_tickers", [])}
     classifications = thresholds.setdefault("classifications", {})
     single_factor = factors.setdefault("single_factor_symbols", [])
-    factor_covered = set(factors.get("sector_factors", {})) | set(single_factor)
+    factor_covered = set(sector_map.get("sector_factors", {})) | set(single_factor)
 
     generated: list[str] = []
     reg_dirty = thr_dirty = fac_dirty = False
@@ -104,20 +119,20 @@ def onboard_ticker(
 
     if sym not in classifications:
         classifications[sym] = DEFAULT_CLASSIFICATION
-        generated.append(f"alert_thresholds.json → classification '{DEFAULT_CLASSIFICATION}'")
+        generated.append(f"classifications.json → classification '{DEFAULT_CLASSIFICATION}'")
         thr_dirty = True
 
     if sym not in factor_covered:
         single_factor.append(sym)
-        generated.append("sector_factors.json → single_factor_symbols (aucun ETF deviné)")
+        generated.append("single_factor_symbols.json → entrée ajoutée (aucun ETF deviné)")
         fac_dirty = True
 
     if reg_dirty:
         _atomic_write_json(registry_path, registry)
     if thr_dirty:
-        _atomic_write_json(thresholds_path, thresholds)
+        _atomic_write_json(classifications_path, thresholds)
     if fac_dirty:
-        _atomic_write_json(factors_path, factors)
+        _atomic_write_json(single_factors_path, factors)
 
     if not generated:
         return OnboardResult(
@@ -144,22 +159,28 @@ def offboard_ticker(
     symbol: str,
     *,
     registry_path: Path = REGISTRY_PATH,
-    thresholds_path: Path = ALERT_THRESHOLDS_PATH,
-    factors_path: Path = SECTOR_FACTORS_PATH,
+    classifications_path: Path = CLASSIFICATIONS_PATH,
+    single_factors_path: Path = SINGLE_FACTORS_PATH,
 ) -> OnboardResult:
     """Remove a symbol from the Layer B referentials (mirror of onboard_ticker).
 
     No network validation: the symbol is being retired, not vetted. Removes the
-    registry entry, the classification and any factor coverage (single_factor or
-    ETF mapping). Idempotent: an absent symbol touches nothing.
+    registry entry, the classification and the single-factor entry. Idempotent: an
+    absent symbol touches nothing.
+
+    An ETF sector mapping, if the symbol has one, is deliberately left alone since
+    Epic 10 S4: it is configuration, and an automatic path may not rewrite it. A
+    mapping without a registry entry is inert — it only says which factor WOULD
+    apply — whereas letting offboarding edit the config would make the migration
+    invariant red on the first retired ticker.
     """
     sym = symbol.strip().upper()
     if not sym:
         return OnboardResult(symbol=symbol, status=INVALID, reason="Symbole vide.")
 
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    thresholds = json.loads(thresholds_path.read_text(encoding="utf-8"))
-    factors = json.loads(factors_path.read_text(encoding="utf-8"))
+    registry = load_state(registry_path)
+    thresholds = load_state(classifications_path)
+    factors = load_state(single_factors_path)
 
     generated: list[str] = []
 
@@ -173,21 +194,14 @@ def offboard_ticker(
     classifications = thresholds.get("classifications", {})
     if sym in classifications:
         del classifications[sym]
-        _atomic_write_json(thresholds_path, thresholds)
-        generated.append("alert_thresholds.json → classification retirée")
+        _atomic_write_json(classifications_path, thresholds)
+        generated.append("classifications.json → classification retirée")
 
     single_factor = factors.get("single_factor_symbols", [])
-    sector_map = factors.get("sector_factors", {})
-    fac_dirty = False
     if sym in single_factor:
         factors["single_factor_symbols"] = [s for s in single_factor if s != sym]
-        fac_dirty = True
-    if sym in sector_map:
-        del sector_map[sym]
-        fac_dirty = True
-    if fac_dirty:
-        _atomic_write_json(factors_path, factors)
-        generated.append("sector_factors.json → couverture facteur retirée")
+        _atomic_write_json(single_factors_path, factors)
+        generated.append("single_factor_symbols.json → entrée retirée")
 
     if not generated:
         return OnboardResult(symbol=sym, status=NOT_PRESENT)

@@ -34,10 +34,11 @@ from urllib.request import urlopen
 
 from agents.warren.manage_tickers import _load, _save, _today
 from market_intelligence.registry_check import (
-    ALERT_THRESHOLDS_PATH,
+    CLASSIFICATIONS_PATH,
     REGISTRY_PATH,
     REPO_ROOT,
     SECTOR_FACTORS_PATH,
+    SINGLE_FACTORS_PATH,
 )
 from market_intelligence.ticker_onboard import (
     ALREADY_PRESENT,
@@ -248,6 +249,7 @@ def sync_referential(
     *,
     watchlist_symbols: set[str],
     portfolio_path: str | os.PathLike | None = None,
+    referential_paths: dict[str, Path] | None = None,
 ) -> dict[str, int]:
     """Mirror the cohort into the Layer B referentials, one symbol at a time.
 
@@ -260,16 +262,20 @@ def sync_referential(
     back to back 45 minutes before the EOD run. A failure is a logged skip for
     that symbol alone, never an exception that sinks the ones after it.
     """
-    paths = {
+    state = {
         "registry_path": Path(REGISTRY_PATH),
-        "thresholds_path": Path(ALERT_THRESHOLDS_PATH),
-        "factors_path": Path(SECTOR_FACTORS_PATH),
+        "classifications_path": Path(CLASSIFICATIONS_PATH),
+        "single_factors_path": Path(SINGLE_FACTORS_PATH),
     }
+    state.update(referential_paths or {})
+    # Onboarding also READS the sector map (versioned config) to know whether the
+    # symbol already has an ETF factor; offboarding never touches it.
+    onboard_paths = {"sector_factors_path": Path(SECTOR_FACTORS_PATH), **state}
     counts = {"onboarded": 0, "offboarded": 0, "skipped": 0, "failed": 0}
 
     for symbol in added:
         try:
-            result = onboard_ticker(symbol, **paths)
+            result = onboard_ticker(symbol, **onboard_paths)
         except Exception as exc:  # noqa: BLE001 - network/IO of one symbol only
             logger.error("v5 bridge: onboarding %s failed (%s) - skipped", symbol, exc)
             counts["failed"] += 1
@@ -288,7 +294,7 @@ def sync_referential(
             counts["skipped"] += 1
             continue
         try:
-            offboard_ticker(symbol, **paths)
+            offboard_ticker(symbol, **state)
         except Exception as exc:  # noqa: BLE001 - one symbol never sinks the run
             logger.error("v5 bridge: offboarding %s failed (%s) - skipped", symbol, exc)
             counts["failed"] += 1

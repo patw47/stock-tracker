@@ -104,11 +104,24 @@ def _positive_integer(name: str, value: object) -> int:
     return int(number)
 
 
-def load_alert_config(path: Path = _CONFIG_PATH) -> AlertThresholdConfig:
-    """Load and validate ticker classifications and Sprint 3 thresholds."""
+def load_alert_config(
+    path: Path = _CONFIG_PATH,
+    classifications_path: Path | None = None,
+) -> AlertThresholdConfig:
+    """Load and validate ticker classifications and Sprint 3 thresholds.
+
+    Two files since Epic 10 S4, one per side of the split: the thresholds are
+    configuration (versioned, reviewed in a PR), the per-symbol classifications are
+    state that follows the cohort. An absent state file is an empty classification
+    table — the fresh-machine case — while absent or malformed thresholds still
+    raise: a threshold is never optional.
+    """
+    from market_intelligence.registry_check import CLASSIFICATIONS_PATH, load_state
+
     raw = json.loads(path.read_text(encoding="utf-8"))
     thresholds = raw.get("thresholds")
-    classifications = raw.get("classifications")
+    state = load_state(classifications_path or CLASSIFICATIONS_PATH)
+    classifications = state.get("classifications", {})
     if not isinstance(thresholds, dict) or not isinstance(classifications, dict):
         raise AlertConfigError("Config requires thresholds and classifications objects")
 

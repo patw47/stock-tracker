@@ -36,32 +36,48 @@ class _FakeValidation:
 
 @pytest.fixture
 def data_files(tmp_path: Path):
-    """Trois référentiels tmp avec un ticker existant cohérent (OLD)."""
+    """Référentiels tmp avec un ticker existant cohérent (OLD).
+
+    Depuis l'Epic 10 S4, trois fichiers d'ÉTAT (registre, classifications, liste à
+    facteur unique) et un fichier de CONFIGURATION en lecture seule (la table des
+    facteurs sectoriels), qu'aucun chemin automatique ne doit réécrire.
+    """
     registry = tmp_path / "registry.json"
-    thresholds = tmp_path / "alert_thresholds.json"
-    factors = tmp_path / "sector_factors.json"
+    classifications = tmp_path / "classifications.json"
+    single_factors = tmp_path / "single_factor_symbols.json"
+    sector_map = tmp_path / "sector_factors.json"
     registry.write_text(json.dumps({
         "portfolio_tickers": [{"symbol": "OLD", "api_symbol": "OLD", "expected_name": "Old Co"}],
         "macro_tickers": [],
         "factor_tickers": [],
         "alias_map": {},
     }), encoding="utf-8")
-    thresholds.write_text(json.dumps({
-        "thresholds": {"volume_z": 2.5},
-        "classifications": {"OLD": "calm"},
-    }), encoding="utf-8")
-    factors.write_text(json.dumps({
+    classifications.write_text(
+        json.dumps({"classifications": {"OLD": "calm"}}), encoding="utf-8"
+    )
+    single_factors.write_text(json.dumps({"single_factor_symbols": []}), encoding="utf-8")
+    sector_map.write_text(json.dumps({
         "market_factor": "IWM",
         "correlation_threshold": 0.35,
         "sector_factors": {"OLD": ["XLK"]},
-        "single_factor_symbols": [],
     }), encoding="utf-8")
-    return registry, thresholds, factors
+    return registry, classifications, single_factors, sector_map
 
 
 def _paths(data_files):
-    reg, thr, fac = data_files
-    return {"registry_path": reg, "thresholds_path": thr, "factors_path": fac}
+    """Chemins d'onboarding : les trois fichiers d'état + la config en lecture."""
+    reg, cls, single, sector = data_files
+    return {
+        "registry_path": reg,
+        "classifications_path": cls,
+        "single_factors_path": single,
+        "sector_factors_path": sector,
+    }
+
+
+def _state_paths(data_files):
+    """Chemins d'offboarding : l'état seul — la config n'est jamais réécrite."""
+    return {k: v for k, v in _paths(data_files).items() if k != "sector_factors_path"}
 
 
 def _ok(monkeypatch, name="New Corp"):
@@ -76,7 +92,7 @@ def _ok(monkeypatch, name="New Corp"):
 
 def test_onboard_valid_generates_all_entries(monkeypatch, data_files):
     _ok(monkeypatch)
-    reg, thr, fac = data_files
+    reg, thr, fac, sector = data_files
     result = onboard_ticker("nvda", **_paths(data_files))
 
     assert result.status == ONBOARDED
@@ -92,25 +108,25 @@ def test_onboard_valid_generates_all_entries(monkeypatch, data_files):
 
 def test_onboard_defaults_speculative_single_factor_never_maps(monkeypatch, data_files):
     _ok(monkeypatch)
-    reg, thr, fac = data_files
+    reg, thr, fac, sector = data_files
     onboard_ticker("NVDA", **_paths(data_files))
 
-    factors = json.loads(fac.read_text())
-    assert "NVDA" in factors["single_factor_symbols"]
-    assert "NVDA" not in factors["sector_factors"]  # jamais de mapping ETF deviné
+    assert "NVDA" in json.loads(fac.read_text())["single_factor_symbols"]
+    # jamais de mapping ETF deviné — et la config n'est même pas ouverte en écriture
+    assert "NVDA" not in json.loads(sector.read_text())["sector_factors"]
     assert json.loads(thr.read_text())["classifications"]["NVDA"] == "speculative"
 
 
 def test_registry_check_passe_apres_onboard(monkeypatch, data_files):
     _ok(monkeypatch)
-    reg, thr, fac = data_files
+    reg, thr, fac, sector = data_files
     onboard_ticker("NVDA", **_paths(data_files))
 
     issues = registry_check.evaluate(
         {"portfolio.json": ["NVDA"]},
         registry_check.load_registry_symbols(reg),
         registry_check.load_classified_symbols(thr),
-        registry_check.load_factor_covered_symbols(fac),
+        registry_check.load_factor_covered_symbols(sector, fac),
     )
     assert [i for i in issues if i.severity == registry_check.BLOCKING] == []
 
@@ -123,7 +139,7 @@ def test_onboard_invalid_ne_modifie_aucun_fichier(monkeypatch, data_files):
         ticker_onboard, "_validate_symbol",
         lambda sym: _FakeValidation(status="not_found", reason="No name"),
     )
-    reg, thr, fac = data_files
+    reg, thr, fac, sector = data_files
     before = {p: p.read_text() for p in (reg, thr, fac)}
 
     result = onboard_ticker("FAKE", **_paths(data_files))
@@ -149,7 +165,7 @@ def test_symbole_valide_avant_ecriture(monkeypatch, data_files):
 
 def test_onboard_idempotent(monkeypatch, data_files):
     _ok(monkeypatch)
-    reg, thr, fac = data_files
+    reg, thr, fac, sector = data_files
     onboard_ticker("NVDA", **_paths(data_files))
     snapshot = {p: p.read_text() for p in (reg, thr, fac)}
 
@@ -184,10 +200,10 @@ def test_format_result_variants(monkeypatch, data_files):
 
 def test_offboard_retire_toutes_les_entrees(monkeypatch, data_files):
     _ok(monkeypatch)
-    reg, thr, fac = data_files
+    reg, thr, fac, sector = data_files
     onboard_ticker("NVDA", **_paths(data_files))
 
-    result = offboard_ticker("nvda", **_paths(data_files))
+    result = offboard_ticker("nvda", **_state_paths(data_files))
 
     assert result.status == OFFBOARDED
     assert result.symbol == "NVDA"
@@ -195,25 +211,33 @@ def test_offboard_retire_toutes_les_entrees(monkeypatch, data_files):
     registry = json.loads(reg.read_text())
     assert all(t["symbol"] != "NVDA" for t in registry["portfolio_tickers"])
     assert "NVDA" not in json.loads(thr.read_text())["classifications"]
-    factors = json.loads(fac.read_text())
-    assert "NVDA" not in factors["single_factor_symbols"]
-    assert "NVDA" not in factors["sector_factors"]
+    assert "NVDA" not in json.loads(fac.read_text())["single_factor_symbols"]
 
 
-def test_offboard_retire_aussi_le_mapping_etf(data_files):
-    reg, thr, fac = data_files
-    result = offboard_ticker("OLD", **_paths(data_files))
+def test_offboard_ne_touche_jamais_la_config_sectorielle(data_files):
+    """Epic 10 S4 : l'offboarding retire l'état, jamais la configuration.
+
+    OLD a un mapping ETF (`sector_factors`), qui est une décision prise en PR. Le
+    retirer automatiquement rendrait l'invariant de configuration rouge au premier
+    ticker sorti de cohorte. Un mapping sans entrée de registre est inerte : il dit
+    seulement quel facteur *s'appliquerait* si le titre revenait.
+    """
+    reg, thr, fac, sector = data_files
+    config_before = sector.read_text()
+
+    result = offboard_ticker("OLD", **_state_paths(data_files))
 
     assert result.status == OFFBOARDED
-    assert "OLD" not in json.loads(fac.read_text())["sector_factors"]
     assert all(t["symbol"] != "OLD" for t in json.loads(reg.read_text())["portfolio_tickers"])
+    assert "OLD" not in json.loads(thr.read_text())["classifications"]
+    assert sector.read_text() == config_before  # tolérance nulle sur la config
 
 
 def test_offboard_absent_ne_touche_rien(data_files):
-    reg, thr, fac = data_files
+    reg, thr, fac, sector = data_files
     snapshot = (reg.read_text(), thr.read_text(), fac.read_text())
 
-    result = offboard_ticker("GHOST", **_paths(data_files))
+    result = offboard_ticker("GHOST", **_state_paths(data_files))
 
     assert result.status == NOT_PRESENT
     assert result.generated == ()
