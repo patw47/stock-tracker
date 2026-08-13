@@ -236,12 +236,19 @@ watched by Layer C for its judgment window, then drops it out again. It carries
 **attention, never a verdict**: both signals (tension here, v5 cohort there) are
 in forward validation.
 
-- **Source** — the smallcaps API on the same VPS, read at `SMALLCAPS_API_URL`
-  (default `http://localhost:8000`). The `/api/scan` payload embeds the v5
-  tracking journal (one row per window × ticker). The union of the 7/14/21-day
-  windows is deduplicated per ticker, longest `days_held` winning.
-  ⚠️ **Never point this at a public URL**: the API has no authentication and
-  serves unversioned edge values.
+- **Source** — a snapshot file, `runtime/screener/latest.json`, **pushed by the
+  workstation** whenever a scan lands (`deploy/screener-push.*`): the screener
+  runs at home behind a router, so the VPS never could call it. The pushed
+  payload is the `/api/scan` response, which embeds the v5 tracking journal (one
+  row per window × ticker). The union of the 7/14/21-day windows is deduplicated
+  per ticker, longest `days_held` winning. The HTTP source survives for a run
+  made *on* the workstation (`run(api_url=…)`); ⚠️ **never point it at a public
+  URL**: the API has no authentication and serves unversioned edge values.
+- **Only forward in time** — the `scanned_at` of the applied snapshot is
+  memorised in `watchlist.json` (`v5_scanned_at`). A snapshot that is not
+  strictly newer is refused and logged, never written: age breaks nothing, but an
+  old snapshot replayed would remove every ticker qualified since. Beyond 3
+  trading days without a fresh snapshot the EOD watchdog alerts on Telegram.
 - **Reconciliation, not an event stream** — the target state is derived from the
   journal on every run: tracked and `days_held < 63` → in the watchlist;
   `days_held >= 63` (the v5 judgment horizon) or gone from the journal → out.
@@ -831,7 +838,7 @@ python3 -m market_intelligence.dedup_admin reset --ticker SYMBOL
 | `TELEGRAM_TOKEN` | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | Target chat ID |
 | `TWELVE_DATA_API_KEY` | Layer B EOD data fallback (yfinance primary) |
-| `SMALLCAPS_API_URL` | smallcaps-screener API for the v5 bridge (default `http://localhost:8000`, loopback only) |
+| `SMALLCAPS_API_URL` | smallcaps-screener API, read by `deploy/screener-push.sh` **on the workstation** (default `http://localhost:8000`, loopback only). Unused on the VPS: the bridge reads the pushed snapshot. |
 | `NODE_FUNCTION_ALLOW_BUILTIN` | Must include `fs` — n8n Code nodes read the ticker JSON files |
 | `N8N_PORT` | n8n HTTP port (default: `5680`) |
 | `N8N_USER_FOLDER` | n8n data directory |

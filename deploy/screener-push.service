@@ -1,0 +1,6 @@
+[Unit]
+Description=Pousse l'instantané du screener local vers le VPS (Epic 10 S1)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /home/acer/stock-tracker/deploy/screener-push.sh
