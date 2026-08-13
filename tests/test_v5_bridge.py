@@ -1,6 +1,7 @@
 """Fixture-only tests for the v5 -> watchlist bridge. No network, ever."""
 from __future__ import annotations
 
+import hashlib
 import json
 from urllib.error import URLError
 
@@ -11,14 +12,14 @@ from market_intelligence import v5_bridge
 MANUAL = {"symbol": "NVDA", "added": "2026-01-05"}  # Telegram add: untouchable
 
 
-def _payload(*rows: tuple[str, int, int]) -> dict:
+def _payload(*rows: tuple[str, int, int], scanned_at: str = "2026-08-04T20:40:00Z") -> dict:
     """A frozen /api/scan payload: (ticker, window, days_held) tracking rows.
 
     Shape mirrors the live payload of 2026-08-04: a flat ``v5.tracking`` list of
     window x ticker rows, alongside the v4 journal the bridge must ignore.
     """
     return {
-        "scanned_at": "2026-08-04T20:40:00Z",
+        "scanned_at": scanned_at,
         "universe_size": 812,
         # Previous protocol, different cohort: must never reach the watchlist.
         "v4_tracking": [
@@ -146,9 +147,11 @@ def test_dead_api_is_a_logged_no_op(monkeypatch, watchlist, caplog):
     monkeypatch.setattr(v5_bridge, "urlopen", _boom)
 
     with caplog.at_level("ERROR"):
-        result = v5_bridge.run(watchlist_path=watchlist.path)
+        result = v5_bridge.run(
+            api_url="http://localhost:8000", watchlist_path=watchlist.path
+        )
 
-    assert result["anomalies"] == ["v5 tracking unavailable"]
+    assert result["anomalies"] == ["v5 snapshot unavailable"]
     assert "unreachable" in caplog.text
     assert watchlist.symbols() == ["ATNF"]
 
@@ -199,6 +202,121 @@ def test_empty_tracking_with_live_bridged_tickers_never_purges(watchlist, caplog
     assert "not a purge" in result["anomalies"][0]
     assert "ATNF" in caplog.text
     assert watchlist.symbols() == ["ATNF"]
+
+
+# 6bis. source fichier + garde de monotonie (Epic 10 S1) --------------------
+#
+# Piège de chemin : watchlist.json est gitignoré, donc `git diff` y est vide par
+# construction et prouverait n'importe quoi. La non-écriture se prouve par une
+# empreinte SHA-256 prise avant exécution et revérifiée après.
+
+def _digest(path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.fixture
+def snapshot(tmp_path):
+    """Le fichier que le poste pousse; .write(payload) puis run(snapshot_path=...)."""
+    path = tmp_path / "latest.json"
+
+    def _write(payload: dict):
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    _write.path = path
+    return _write
+
+
+def test_fresh_snapshot_from_a_file_drives_the_reconciliation(watchlist, snapshot):
+    watchlist.write([{"symbol": "OLD", "added": "2026-05-01", "source": "smallcaps-v5"}])
+    snapshot(_payload(("ATNF", 14, 3), scanned_at="2026-08-13T08:10:01+00:00"))
+
+    result = v5_bridge.run(
+        snapshot_path=snapshot.path, watchlist_path=watchlist.path
+    )
+
+    assert result["added"] == ["ATNF"] and result["removed"] == ["OLD"]
+    assert watchlist.symbols() == ["ATNF"]
+
+
+def test_replaying_the_same_snapshot_writes_nothing(watchlist, snapshot):
+    snapshot(_payload(("ATNF", 14, 3), scanned_at="2026-08-13T08:10:01+00:00"))
+    v5_bridge.run(snapshot_path=snapshot.path, watchlist_path=watchlist.path)
+
+    before = _digest(watchlist.path)
+    result = v5_bridge.run(snapshot_path=snapshot.path, watchlist_path=watchlist.path)
+
+    assert (result["added"], result["removed"]) == ([], [])
+    assert _digest(watchlist.path) == before  # tolérance nulle
+
+
+def test_older_snapshot_is_refused_and_logged(watchlist, snapshot, caplog):
+    snapshot(_payload(("ATNF", 14, 3), scanned_at="2026-08-13T08:10:01+00:00"))
+    v5_bridge.run(snapshot_path=snapshot.path, watchlist_path=watchlist.path)
+    before = _digest(watchlist.path)
+
+    # Un instantané d'avant-hier re-poussé : il retirerait ATNF, qualifié depuis.
+    snapshot(_payload(("SNTI", 7, 2), scanned_at="2026-08-11T08:00:00+00:00"))
+    with caplog.at_level("WARNING"):
+        result = v5_bridge.run(snapshot_path=snapshot.path, watchlist_path=watchlist.path)
+
+    assert (result["added"], result["removed"]) == ([], [])
+    assert "not newer than the applied" in result["anomalies"][0]
+    assert "refused, no write" in caplog.text
+    assert _digest(watchlist.path) == before
+    assert watchlist.symbols() == ["ATNF"]
+
+
+def test_fresh_snapshot_without_change_leaves_the_file_untouched(watchlist, snapshot):
+    """Écriture conditionnelle préservée : plus récent mais rien à faire = rien."""
+    snapshot(_payload(("ATNF", 14, 3), scanned_at="2026-08-13T08:10:01+00:00"))
+    v5_bridge.run(snapshot_path=snapshot.path, watchlist_path=watchlist.path)
+    before = _digest(watchlist.path)
+
+    snapshot(_payload(("ATNF", 14, 4), scanned_at="2026-08-14T08:10:01+00:00"))
+    result = v5_bridge.run(snapshot_path=snapshot.path, watchlist_path=watchlist.path)
+
+    assert (result["added"], result["removed"], result["unchanged"]) == ([], [], 1)
+    assert _digest(watchlist.path) == before
+
+
+def test_absent_then_unreadable_snapshot_is_a_logged_no_op(watchlist, tmp_path, caplog):
+    watchlist.write([{"symbol": "ATNF", "added": "2026-05-01", "source": "smallcaps-v5"}])
+    before = _digest(watchlist.path)
+
+    with caplog.at_level("ERROR"):
+        absent = v5_bridge.run(
+            snapshot_path=tmp_path / "nope.json", watchlist_path=watchlist.path
+        )
+    assert absent["anomalies"] == ["v5 snapshot unavailable"]
+    assert "unreadable" in caplog.text
+
+    broken = tmp_path / "latest.json"
+    broken.write_text('{"scanned_at": "2026-08-13T0', encoding="utf-8")
+    caplog.clear()
+    with caplog.at_level("ERROR"):
+        result = v5_bridge.run(snapshot_path=broken, watchlist_path=watchlist.path)
+
+    assert result["anomalies"] == ["v5 snapshot unavailable"]
+    assert "not valid JSON" in caplog.text
+    assert _digest(watchlist.path) == before  # aucune écriture dans les deux cas
+
+
+def test_snapshot_without_scanned_at_never_overwrites_a_guarded_watchlist(
+    watchlist, snapshot
+):
+    """Un instantané sans horodatage ne peut pas prouver qu'il est plus récent."""
+    snapshot(_payload(("ATNF", 14, 3), scanned_at="2026-08-13T08:10:01+00:00"))
+    v5_bridge.run(snapshot_path=snapshot.path, watchlist_path=watchlist.path)
+    before = _digest(watchlist.path)
+
+    payload = _payload(("SNTI", 7, 2))
+    payload.pop("scanned_at")
+    snapshot(payload)
+    result = v5_bridge.run(snapshot_path=snapshot.path, watchlist_path=watchlist.path)
+
+    assert result["added"] == [] and "not newer" in result["anomalies"][0]
+    assert _digest(watchlist.path) == before
 
 
 # 7. cap reached ------------------------------------------------------------

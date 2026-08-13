@@ -91,6 +91,63 @@ journalctl -u eod-watchdog.service --no-pager | tail
 Le watchdog écrit uniquement sur Telegram (aucune écriture disque/DB). Voir l'ADR
 `decisions/2026-07-02_observabilite.md`.
 
+## Poussée des instantanés du screener (Epic 10 — Sprint 1)
+
+Le screener tourne **sur le poste** (Docker, port 8000), derrière une box, sans adresse
+stable : le VPS ne peut pas l'appeler. Sept exécutions consécutives de `v5-bridge.service`
+en `Connection refused`, `added=0 removed=0`, sans une alerte. Le sens du tuyau est donc
+inversé — **le poste pousse, le VPS lit un fichier**.
+
+- **Côté poste** (unités systemd **utilisateur**, à installer une fois) :
+
+  ```bash
+  mkdir -p ~/.config/systemd/user
+  cp deploy/screener-push.path deploy/screener-push.service ~/.config/systemd/user/
+  systemctl --user daemon-reload
+  systemctl --user enable --now screener-push.path
+  systemctl --user status screener-push.path      # active (waiting)
+  journalctl --user -u screener-push.service -n 20 --no-pager
+  ```
+
+  `screener-push.path` surveille `~/smallcaps-screener/backups/`. **Le déclencheur est
+  l'apparition d'un instantané, jamais une horloge** : la cadence du screener est
+  irrégulière (un scan au démarrage du conteneur, cadré par un cache de 12 h), et une
+  poussée planifiée enverrait un fichier périmé les jours sans démarrage.
+
+  `deploy/screener-push.sh` pousse la **réponse de `/api/scan`**, pas le fichier de backup :
+  les backups sont volontairement amputés du journal de suivi v5, dont le pont a besoin
+  (`days_held`). Le backup ne sert que de signal. Écriture atomique côté VPS
+  (`cat > …tmp && mv`). Variables surchargeables : `SMALLCAPS_API_URL`,
+  `SCREENER_PUSH_REMOTE`, `SCREENER_PUSH_PATH`. Nécessite `loginctl enable-linger` pour
+  survivre à la fermeture de session.
+
+- **Côté VPS** : `market_intelligence/v5_bridge.py` lit
+  `runtime/screener/latest.json` (gitignoré : un instantané est de l'état d'exécution, un
+  `git reset --hard` de déploiement ne doit pas en ressusciter un ancien).
+  `v5-bridge.service` ne définit plus `SMALLCAPS_API_URL` — la source HTTP ne sert plus que
+  pour un run lancé *sur le poste*.
+
+- **Garde de monotonie** : le `scanned_at` de l'instantané **appliqué** est mémorisé dans
+  `watchlist.json` (clé `v5_scanned_at`). Tout instantané qui n'est pas strictement plus
+  récent est refusé, journalisé, sans écriture. L'ancienneté n'abîme rien (`entry_date` est
+  immuable) ; le seul cas destructeur est la régression — un instantané ancien re-poussé
+  retirerait les tickers qualifiés depuis. L'écriture reste conditionnelle : un instantané
+  frais sans changement ne touche pas le fichier, donc ne mémorise rien.
+
+- **Alarme d'ancienneté** : `deploy/watchdog_eod.py` lit le `scanned_at` de
+  `runtime/screener/latest.json`. Au-delà de `SNAPSHOT_STALE_TRADING_DAYS = 3` jours de
+  bourse (ou sans instantané du tout) il envoie un message Telegram, même canal et même
+  contrat que les vérifications EOD existantes. Seuil dérivé de la cadence des
+  qualifications v5 : 14 dates d'entrée distinctes sur 19 jours de bourse (une vague tous les
+  1,4 jour), donc à 3 jours on en a probablement manqué deux. C'est une **alarme, pas un
+  frein** : le mode de panne visé est le no-op silencieux, pas la donnée périmée.
+
+  ```bash
+  # Sur le VPS, verdict complet sans envoi :
+  python3 /opt/apps/stock-tracker/deploy/watchdog_eod.py --check-only
+  # la ligne [watchdog] porte snapshot=<date> ou snapshot=none
+  ```
+
 ## Mode dry-run du pipeline EOD (Sprint 1 — epic dédup transactionnel)
 
 Le pipeline `python -m market_intelligence.eod_orchestrator` peut être exécuté **sans

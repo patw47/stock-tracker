@@ -7,8 +7,15 @@ those are ever removed. Telegram-added tickers are untouchable (safety rule #1).
 
 This is a RECONCILIATION, not an event stream: it derives the target state from
 the current tracking journal and converges to it, so it is idempotent and robust
-to missed runs. Every failure mode (API down, malformed payload, suspiciously
+to missed runs. Every failure mode (no snapshot, malformed payload, suspiciously
 empty tracking) is a logged no-op — the watchlist is never purged by accident.
+
+Transport (Epic 10 S1): the workstation runs the screener behind a home router,
+so the VPS cannot call it. The workstation PUSHES ``/api/scan`` to
+``runtime/screener/latest.json`` whenever a scan lands (``deploy/screener-push.*``)
+and the bridge reads that file. Only a snapshot strictly newer than the one
+already applied is acted upon — replaying an old one would remove every ticker
+qualified since.
 
 Layer B (registry, classification, sector factors) is deliberately NOT touched:
 that stays a human decision in a PR.
@@ -18,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -36,6 +44,14 @@ SOURCE_TAG = "smallcaps-v5"
 HORIZON_DAYS = 63  # v5 judgment horizon: a bridged ticker leaves at days_held >= 63
 DEFAULT_CAP = 150
 DEFAULT_API_URL = "http://localhost:8000"
+
+# The workstation pushes /api/scan here (deploy/screener-push.sh); the VPS only
+# ever reads a file. `runtime/` is gitignored: a snapshot is execution state, and
+# a deploy `git reset --hard` must not resurrect an old one.
+SNAPSHOT_PATH = REPO_ROOT / "runtime" / "screener" / "latest.json"
+# Watchlist key holding the scanned_at of the last APPLIED snapshot. Kept inside
+# watchlist.json so the guard state travels with the file it protects.
+SCANNED_AT_KEY = "v5_scanned_at"
 
 
 def _symbol(entry: dict) -> str:
@@ -95,24 +111,74 @@ def parse_tracking(payload: object) -> dict[str, int] | None:
     return tracked
 
 
-def fetch_tracking(api_url: str | None = None, timeout: int = 20) -> dict[str, int] | None:
-    """GET ``/api/scan`` and extract the v5 tracking journal; ``None`` on failure.
+def _scanned_at(payload: object, key: str = "scanned_at") -> datetime | None:
+    """Parse a scan timestamp; ``None`` when absent or unparseable.
 
-    The endpoint is non-blocking (it serves the cached scan) and must stay on the
-    loopback: it has no authentication and serves unversioned edge values.
+    Normalised to UTC so two snapshots are always comparable: the screener writes
+    an offset-aware timestamp today, but a naive one would silently compare as a
+    different type and crash the guard rather than protect it.
     """
-    base = (api_url or os.environ.get("SMALLCAPS_API_URL") or DEFAULT_API_URL).rstrip("/")
-    url = f"{base}/api/scan"
+    raw = payload.get(key) if isinstance(payload, dict) else None
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def read_snapshot(snapshot_path: str | os.PathLike | None = None) -> dict | None:
+    """Read the scan snapshot the workstation pushed; ``None`` (logged) on failure.
+
+    Absent file, unreadable file, invalid JSON and non-object payload are all the
+    same thing here: no usable snapshot, so a logged no-op — never an exception,
+    never an empty tracking journal (which would look like a purge order).
+    """
+    path = Path(snapshot_path or SNAPSHOT_PATH)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        logger.error("v5 bridge: snapshot %s unreadable (%s) - no-op", path, exc)
+        return None
+    except ValueError as exc:
+        logger.error("v5 bridge: snapshot %s is not valid JSON (%s) - no-op", path, exc)
+        return None
+    if not isinstance(payload, dict):
+        logger.error(
+            "v5 bridge: snapshot %s is a %s, not an object - no-op",
+            path,
+            type(payload).__name__,
+        )
+        return None
+    return payload
+
+
+def fetch_payload(
+    *,
+    api_url: str | None = None,
+    snapshot_path: str | os.PathLike | None = None,
+    timeout: int = 20,
+) -> dict | None:
+    """Return the scan payload; ``None`` on any failure (always a logged no-op).
+
+    Two sources, file first: the VPS reads the snapshot pushed by the workstation
+    (``deploy/screener-push.sh``). The HTTP source is kept for a run made ON the
+    workstation, where ``/api/scan`` is actually reachable — from the VPS it never
+    was, which is the whole reason this sprint exists.
+    """
+    if api_url is None:
+        return read_snapshot(snapshot_path)
+    url = f"{api_url.rstrip('/') or DEFAULT_API_URL}/api/scan"
     try:
         with urlopen(url, timeout=timeout) as response:  # noqa: S310 - loopback only
             if getattr(response, "status", 200) != 200:
                 logger.error("v5 bridge: %s returned HTTP %s - no-op", url, response.status)
                 return None
-            payload = json.loads(response.read())
+            return json.loads(response.read())
     except (URLError, OSError, ValueError) as exc:
         logger.error("v5 bridge: %s unreachable (%s) - no-op", url, exc)
         return None
-    return parse_tracking(payload)
 
 
 def _result(
@@ -140,6 +206,7 @@ def _result(
 def reconcile(
     tracked: dict[str, int],
     *,
+    scanned_at: datetime | None = None,
     watchlist_path: str | os.PathLike | None = None,
     cap: int = DEFAULT_CAP,
 ) -> dict:
@@ -150,6 +217,20 @@ def reconcile(
         logger.error("v5 bridge: %s", anomaly)
         return _result([], [], 0, [anomaly])
     data = _load(str(path))
+
+    # Monotonicity guard. Age alone breaks nothing (entry_date is immutable,
+    # days_held drifts one notch per trading day), but a REGRESSION does: an old
+    # snapshot replayed would remove every ticker qualified since. Exact test, no
+    # constant to tune — only a strictly newer scan may be applied.
+    applied = _scanned_at(data, SCANNED_AT_KEY)
+    if applied is not None and (scanned_at is None or scanned_at <= applied):
+        anomaly = (
+            f"snapshot scanned_at={scanned_at.isoformat() if scanned_at else 'unknown'} "
+            f"is not newer than the applied {applied.isoformat()} - refused, no write"
+        )
+        logger.warning("v5 bridge: %s", anomaly)
+        return _result([], [], 0, [anomaly])
+
     entries = data["tickers"]
     ours = {_symbol(t) for t in entries if t.get("source") == SOURCE_TAG}
     present = {_symbol(t) for t in entries}
@@ -188,6 +269,10 @@ def reconcile(
         data["tickers"].extend(
             {"symbol": symbol, "added": _today(), "source": SOURCE_TAG} for symbol in added
         )
+        # Memorised only on an APPLIED snapshot: a fresh snapshot that changes
+        # nothing must leave the file byte-identical (conditional write).
+        if scanned_at is not None:
+            data[SCANNED_AT_KEY] = scanned_at.isoformat()
         _save(str(path), data)
 
     return _result(added, removed, len(keep & present), anomalies)
@@ -196,14 +281,23 @@ def reconcile(
 def run(
     *,
     api_url: str | None = None,
+    snapshot_path: str | os.PathLike | None = None,
     watchlist_path: str | os.PathLike | None = None,
     cap: int = DEFAULT_CAP,
 ) -> dict:
-    """Fetch the v5 tracking journal and reconcile the watchlist with it."""
-    tracked = fetch_tracking(api_url)
+    """Read the scan snapshot and reconcile the watchlist with its v5 journal."""
+    payload = fetch_payload(api_url=api_url, snapshot_path=snapshot_path)
+    if payload is None:
+        return _result([], [], 0, ["v5 snapshot unavailable"])
+    tracked = parse_tracking(payload)
     if tracked is None:
         return _result([], [], 0, ["v5 tracking unavailable"])
-    return reconcile(tracked, watchlist_path=watchlist_path, cap=cap)
+    return reconcile(
+        tracked,
+        scanned_at=_scanned_at(payload),
+        watchlist_path=watchlist_path,
+        cap=cap,
+    )
 
 
 if __name__ == "__main__":

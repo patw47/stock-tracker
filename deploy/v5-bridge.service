@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=oneshot
 User=queenp
 WorkingDirectory=/opt/apps/stock-tracker
-# Loopback only: the smallcaps API has no authentication and serves unversioned
-# edge values. Never point this at a public URL.
-Environment=SMALLCAPS_API_URL=http://localhost:8000
+# No API URL: the screener lives on the workstation, behind a home router, and
+# was never reachable from here. The workstation pushes /api/scan into
+# runtime/screener/latest.json (deploy/screener-push.*) and the bridge reads it.
 ExecStart=/usr/bin/python3 -m market_intelligence.v5_bridge

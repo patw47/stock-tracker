@@ -1,0 +1,12 @@
+[Unit]
+Description=Surveille les instantanés du screener local (pousse le scan vers le VPS)
+
+[Path]
+# Le répertoire où le screener dépose un instantané daté à chaque scan.
+# L'apparition d'un fichier EST le déclencheur : la cadence du screener est
+# irrégulière, une horloge pousserait un fichier périmé les jours sans scan.
+PathChanged=/home/acer/smallcaps-screener/backups
+Unit=screener-push.service
+
+[Install]
+WantedBy=default.target

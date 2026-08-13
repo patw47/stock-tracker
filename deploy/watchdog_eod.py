@@ -13,6 +13,10 @@ Vérification secondaire (lecture seule, best-effort) : n8n rapporte-t-il une
 exécution réussie aujourd'hui dans ``database.sqlite`` ? Une divergence
 journal↔n8n est signalée mais ne fait jamais planter le watchdog.
 
+Vérification tierce (Epic 10 S1) : le poste pousse-t-il encore ses instantanés de
+screener (``runtime/screener/latest.json``) ? Sans instantané frais, le pont v5
+ne réconcilie rien et la watchlist se fige — en silence, jusqu'ici.
+
 Le watchdog n'écrit JAMAIS dans la DB n8n et ne dépend pas de n8n pour alerter
 (envoi Telegram via l'API bot directe, token lu depuis ``.env``).
 """
@@ -26,7 +30,7 @@ import sys
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 _REPO = Path("/opt/apps/stock-tracker")
@@ -34,10 +38,19 @@ _RUNS_LOG = _REPO / "runtime" / "market_intelligence" / "runs.jsonl"
 _N8N_DB = _REPO / "n8n-data" / ".n8n" / "database.sqlite"
 _ENV_FILE = _REPO / ".env"
 _WORKFLOW_JSON = _REPO / "workflow.json"
+_SNAPSHOT = _REPO / "runtime" / "screener" / "latest.json"
 _TELEGRAM_API = "https://api.telegram.org"
 
 # n8n execution statuses treated as a failed run.
 _ERROR_STATUSES = {"error", "crashed", "failed", "canceled"}
+
+# Au-delà de ce nombre de jours de bourse sans instantané frais du screener, la
+# watchlist ne suit plus la cohorte et il faut le dire. Dérivé de la cadence des
+# qualifications v5 : 14 dates d'entrée distinctes sur 19 jours de bourse, soit
+# une vague tous les 1,4 jour — à 3 jours on en a probablement manqué deux.
+# Le mode de panne visé n'est pas la donnée fausse (l'ancienneté n'abîme rien),
+# c'est le no-op silencieux : cinq semaines de watchlist gelée sans un mot.
+SNAPSHOT_STALE_TRADING_DAYS = 3
 
 
 @dataclass(frozen=True)
@@ -181,8 +194,76 @@ def _sqlite_hint(sqlite_status: str) -> str:
     }.get(sqlite_status, "")
 
 
-def evaluate(records: list[dict], sqlite_status: str, today: date) -> Verdict:
+def read_snapshot_date(path: Path) -> date | None:
+    """Date du dernier instantané poussé par le poste; ``None`` si indisponible.
+
+    Défensif comme la lecture n8n : fichier absent, JSON cassé ou ``scanned_at``
+    illisible donnent ``None`` — que l'appelant traite comme « rien reçu », donc
+    comme une alarme, jamais comme un plantage du watchdog.
+    """
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        raw = payload["scanned_at"]
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError, ValueError):
+        return None
+
+
+def _trading_days_since(last: date, today: date) -> int:
+    """Jours de bourse écoulés depuis ``last`` (exclu) jusqu'à ``today`` (inclus).
+
+    ponytail: jours ouvrés, sans calendrier de fériés US. Un férié décale
+    l'alarme d'un jour — acceptable pour une alarme, jamais pour un calcul.
+    """
+    return sum(
+        1
+        for step in range(1, (today - last).days + 1)
+        if (last + timedelta(days=step)).weekday() < 5
+    )
+
+
+def _snapshot_alarm(snapshot_date: date | None, today: date) -> str | None:
+    """Message d'alarme si le screener ne pousse plus, sinon ``None``."""
+    if snapshot_date is None:
+        return (
+            "🔴 Watchdog screener — aucun instantané reçu du poste. Le pont v5 ne "
+            "peut rien réconcilier : la watchlist est figée sur son dernier état.\n"
+            "Pistes : screener-push.path inactif sur le poste, conteneur du "
+            "screener arrêté, clé SSH poste→VPS invalide."
+        )
+    elapsed = _trading_days_since(snapshot_date, today)
+    if elapsed < SNAPSHOT_STALE_TRADING_DAYS:
+        return None
+    return (
+        f"🔴 Watchdog screener — aucun instantané frais depuis {elapsed} jours de "
+        f"bourse (dernier scan : {snapshot_date.isoformat()}). La watchlist ne "
+        f"suit plus la cohorte v5 : les qualifications de la période sont absentes "
+        f"de l'univers scanné.\n"
+        f"Pistes : screener-push.path inactif sur le poste, conteneur du screener "
+        f"arrêté, clé SSH poste→VPS invalide."
+    )
+
+
+def evaluate(
+    records: list[dict],
+    sqlite_status: str,
+    today: date,
+    snapshot_date: date | None,
+) -> Verdict:
     """Decide whether to alert. Pure function — the testable core."""
+    verdict = _evaluate_eod(records, sqlite_status, today)
+    alarm = _snapshot_alarm(snapshot_date, today)
+    if alarm is None:
+        return verdict
+    # Même contrat, même canal : l'alarme screener s'ajoute au verdict EOD au
+    # lieu de l'écraser — les deux pannes sont indépendantes et peuvent coexister.
+    message = f"{verdict.message}\n\n{alarm}" if verdict.message else alarm
+    level = "hard" if verdict.level == "hard" else "soft"
+    return Verdict(level, True, verdict.divergence, message)
+
+
+def _evaluate_eod(records: list[dict], sqlite_status: str, today: date) -> Verdict:
+    """Verdict du seul run EOD (source de vérité : runs.jsonl)."""
     official = [record for record in records if record.get("dry_run") is False]
     today_official = [record for record in official if _run_date(record) == today]
 
@@ -263,6 +344,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--n8n-db", default=None)
     parser.add_argument("--env-file", default=None)
     parser.add_argument("--workflow-json", default=None)
+    parser.add_argument("--snapshot", default=None)
     return parser.parse_args(argv)
 
 
@@ -272,17 +354,20 @@ def main(argv: list[str] | None = None) -> int:
     n8n_db = Path(args.n8n_db) if args.n8n_db else _N8N_DB
     env_file = Path(args.env_file) if args.env_file else _ENV_FILE
     workflow_json = Path(args.workflow_json) if args.workflow_json else _WORKFLOW_JSON
+    snapshot = Path(args.snapshot) if args.snapshot else _SNAPSHOT
 
     today = datetime.now(timezone.utc).date()
     records = parse_journal_tail(runs_log)
     workflow_id = read_workflow_id(workflow_json)
     sqlite_status = query_n8n_last_execution(n8n_db, workflow_id, today)
-    verdict = evaluate(records, sqlite_status, today)
+    snapshot_date = read_snapshot_date(snapshot)
+    verdict = evaluate(records, sqlite_status, today, snapshot_date)
 
     print(
         f"[watchdog] date={today.isoformat()} level={verdict.level} "
         f"should_send={verdict.should_send} divergence={verdict.divergence} "
-        f"sqlite={sqlite_status} records={len(records)}"
+        f"sqlite={sqlite_status} records={len(records)} "
+        f"snapshot={snapshot_date.isoformat() if snapshot_date else 'none'}"
     )
     if verdict.message:
         print(verdict.message)
