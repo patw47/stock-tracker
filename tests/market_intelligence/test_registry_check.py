@@ -108,7 +108,7 @@ def state(tmp_path, monkeypatch):
             ],
         }),
         "CLASSIFICATIONS_PATH": ("classifications.json", {
-            "classifications": {s: "speculative" for s in covered},
+            "classifications": dict.fromkeys(covered, "speculative"),
         }),
         "SINGLE_FACTORS_PATH": ("single_factor_symbols.json", {
             "single_factor_symbols": covered,
