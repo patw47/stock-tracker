@@ -123,6 +123,16 @@ def _payload(*rows: tuple[str, int, int], scanned_at: str = "2026-08-04T20:40:00
     }
 
 
+def _context(days_held: int) -> dict:
+    """Le contexte de cohorte que ``_payload`` fait porter à chaque ligne suivie."""
+    return {"entry_date": "2026-07-01", "entry_price": 4.20, "days_held": days_held}
+
+
+def _tracked(**days_held: int) -> dict[str, dict]:
+    """Journal de suivi par symbole, la forme que ``parse_tracking`` retourne."""
+    return {symbol: _context(days) for symbol, days in days_held.items()}
+
+
 @pytest.fixture
 def watchlist(tmp_path):
     """A temporary watchlist.json; call .write(entries) / .read() around a run."""
@@ -156,7 +166,7 @@ def test_tracked_ticker_is_added_and_tagged(watchlist):
 
     assert result["added"] == ["ATNF"]
     assert watchlist.read() == [{"symbol": "ATNF", "added": v5_bridge._today(),
-                                "source": "smallcaps-v5"}]
+                                "source": "smallcaps-v5", "cohort": _context(3)}]
 
     # Reconciliation, not an event stream: a second run is a no-op.
     again = _reconcile(_payload(("ATNF", 14, 4)), watchlist)
@@ -188,7 +198,7 @@ def test_bridged_ticker_leaves_when_gone_from_tracking(watchlist):
 def test_ticker_in_three_windows_yields_one_entry(watchlist):
     payload = _payload(("ATNF", 7, 5), ("ATNF", 14, 12), ("ATNF", 21, 19))
 
-    assert v5_bridge.parse_tracking(payload) == {"ATNF": 19}  # max days_held wins
+    assert v5_bridge.parse_tracking(payload) == _tracked(ATNF=19)  # max days_held
 
     result = _reconcile(payload, watchlist)
     assert result["added"] == ["ATNF"]
@@ -251,7 +261,7 @@ def test_missing_watchlist_is_a_no_op_not_a_creation(tmp_path):
     """Creating watchlist.json in a dev checkout would shadow the example file."""
     absent = tmp_path / "watchlist.json"
 
-    result = v5_bridge.reconcile({"ATNF": 3}, watchlist_path=absent)
+    result = v5_bridge.reconcile(_tracked(ATNF=3), watchlist_path=absent)
 
     assert result["added"] == [] and "does not exist" in result["anomalies"][0]
     assert not absent.exists()
@@ -265,7 +275,7 @@ def test_row_without_days_held_is_skipped(watchlist):
          "status": "données absentes (délisting ?)"}
     )
 
-    assert v5_bridge.parse_tracking(payload) == {"ATNF": 3}
+    assert v5_bridge.parse_tracking(payload) == _tracked(ATNF=3)
 
 
 # 6. suspiciously empty tracking -------------------------------------------
@@ -346,12 +356,18 @@ def test_older_snapshot_is_refused_and_logged(watchlist, snapshot, caplog):
 
 
 def test_fresh_snapshot_without_change_leaves_the_file_untouched(watchlist, snapshot):
-    """Écriture conditionnelle préservée : plus récent mais rien à faire = rien."""
+    """Écriture conditionnelle préservée : plus récent mais rien à faire = rien.
+
+    « Rien à faire » inclut le contexte de cohorte depuis le S3 : même cohorte ET
+    même contexte (``days_held`` inchangé) = fichier intact. Un ``days_held`` qui
+    avance est, lui, un vrai changement de contenu — il doit être écrit, sinon
+    l'alerte afficherait un « jour 27/63 » périmé.
+    """
     snapshot(_payload(("ATNF", 14, 3), scanned_at="2026-08-13T08:10:01+00:00"))
     v5_bridge.run(snapshot_path=snapshot.path, watchlist_path=watchlist.path)
     before = _digest(watchlist.path)
 
-    snapshot(_payload(("ATNF", 14, 4), scanned_at="2026-08-14T08:10:01+00:00"))
+    snapshot(_payload(("ATNF", 14, 3), scanned_at="2026-08-14T08:10:01+00:00"))
     result = v5_bridge.run(snapshot_path=snapshot.path, watchlist_path=watchlist.path)
 
     assert (result["added"], result["removed"], result["unchanged"]) == ([], [], 1)
@@ -431,7 +447,7 @@ def test_portfolio_ticker_is_never_offboarded(watchlist, portfolio, referentials
 
     # HELD sort de la cohorte, mais reste détenu : la watchlist le lâche, pas le
     # référentiel — sinon la détection d'anomalie cesse sur un titre en portefeuille.
-    result = v5_bridge.reconcile({"SNTI": 2}, watchlist_path=watchlist.path,
+    result = v5_bridge.reconcile(_tracked(SNTI=2), watchlist_path=watchlist.path,
                                  portfolio_path=portfolio.path)
 
     assert result["removed"] == ["HELD"] and watchlist.symbols() == ["SNTI"]
@@ -466,7 +482,7 @@ def test_registry_equals_cohort_union_portfolio(watchlist, portfolio, referentia
     watchlist.write([{"symbol": "OLD", "added": "2026-05-01", "source": "smallcaps-v5"}])
     _seed(referentials, "OLD", "HELD")  # état de départ cohérent
 
-    v5_bridge.reconcile({"ATNF": 3, "SNTI": 2}, watchlist_path=watchlist.path,
+    v5_bridge.reconcile(_tracked(ATNF=3, SNTI=2), watchlist_path=watchlist.path,
                         portfolio_path=portfolio.path)
 
     cohort = set(watchlist.symbols())

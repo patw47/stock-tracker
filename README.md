@@ -139,12 +139,29 @@ Every line carries the ticker's **origin** — read from `portfolio.json` /
 when it is in the registry but in neither list (a referential inconsistency
 worth seeing). Fail-soft: an unreadable list drops the tags, never the run.
 
-Each survivor's prose opens on the day's **raw close**, then reads the session by
+Each alert's prose opens on the day's **raw close**, then reads the session by
 three fixed rules on the opening gap (move already there at the open / built in
 session / intraday reversal, with a "cassure ratée" when a 52-week breakout was
 sold off). The z-residual keeps its exact figure and gains a plain-language
-gloss; each Layer C signal gets a canned one too. Still zero LLM: every sentence
+gloss; each tension signal gets a canned one too. Still zero LLM: every sentence
 is a template triggered by an existing field.
+
+Since Epic 10 S3 each block also says **where the selection thesis stands** on
+that ticker — the screener's own judgment context (`cohort` on the watchlist
+entry: entry date and price, day *n*/63, return since entry, checkpoint status),
+omitted field by field when absent, and entirely for a ticker outside any cohort.
+A **trajectory note** follows, in three states, never two: a compression episode
+recorded before this alert (date + lead), none over a journal long enough to
+conclude (`MIN_TENSION_HISTORY_DAYS` = 20 trading days, the tension measurement
+window), or *"too short to tell"* — a ticker that joined the cohort last week has
+no history, and silence there must not read as a negative signal. The note is
+descriptive: an earlier episode is never presented as the cause of the anomaly.
+
+Section titles say what the section *means*, not which pipeline stage produced
+it: "Mouvements inhabituels" (the move HAS HAPPENED, the direction is a fact
+about the session, never a forecast) and "Titres qui se compriment" (direction
+unknown, hypothesis under measurement). "Layer B", "Layer C" and "survivant"
+appear nowhere in the message.
 
 ```
 1. HIMS (💼 portefeuille) — baisse ↓   [escalade]
@@ -152,14 +169,19 @@ Escalade : HIMS était déjà verrouillé (il avait déclenché à −2,4)…
 Concrètement : clôture −9,8 % aujourd'hui, alors que le titre avait OUVERT en
 hausse (+2,2 %) et touché un plus-haut de 52 semaines en séance — il s'est
 retourné en cours de journée (cassure ratée : l'élan du matin a été vendu).
+🔎 Suivi de compression trop court (6 jour(s) suivis sur 20) — impossible de
+dire s'il y a eu compression.
 
 2. BBAI (👀 watchlist) — hausse ↑   [première alerte]
 Concrètement : clôture +7,2 % aujourd'hui, après une ouverture déjà en hausse
 (gap +6,4 %). … Son z-résiduel atteint +2,8 (seuil 2,5) — le titre bouge
 nettement plus que son comportement habituel : son mouvement propre, une fois
 retirée la part expliquée par le marché, fait environ 3× sa journée typique.
+🎯 Retenu le 17/07 à 4,12, jour 27/63 (36 restants), +8,0 % depuis l'entrée,
+au-dessus de son repère de première semaine.
+🔎 Compression repérée le 12/06, 35 jours avant cette alerte.
 
-ASTS (registre seul): squeeze (bw pctl 8%)      ← ⚡ Layer C block
+ASTS (registre seul): squeeze (bw pctl 8%)      ← ⚡ bloc « titres qui se compriment »
    ↳ volatilité comprimée dans le pire décile de son année — un mouvement se
      prépare, direction inconnue
 ```

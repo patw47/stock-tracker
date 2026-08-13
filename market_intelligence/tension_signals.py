@@ -7,7 +7,7 @@ import logging
 import math
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Final
 
@@ -24,6 +24,15 @@ QUIET_RVOL5: Final[float] = 2.0        # 5-day mean relative volume
 QUIET_CUM5: Final[float] = 0.03        # |5-day cumulative return| ceiling
 HORIZON_DAYS: Final[int] = 20          # forward window for the outcome event
 EXPECTED_MOVE_MULT: Final[float] = 2.0  # explosion = move > MULT x expected
+
+# Couverture minimale du journal de tension pour qu'une ABSENCE de compression
+# soit une information (Epic 10 S3). Dérivée de HORIZON_DAYS : c'est la fenêtre
+# sur laquelle un épisode est mesuré (docs/TENSION.md), donc la mémoire minimale
+# qu'il faut avoir d'un titre pour affirmer qu'il ne s'est rien passé. Un journal
+# plus court que sa propre fenêtre de mesure ne peut dire que « je ne sais pas » :
+# un ticker entré en cohorte la semaine dernière n'a aucun historique, et son
+# absence de marque se lirait à tort comme un signal négatif.
+MIN_TENSION_HISTORY_DAYS: Final[int] = HORIZON_DAYS
 
 _BW_WINDOW: Final[int] = 20
 _BW_RANK_WINDOW: Final[int] = 252
@@ -188,6 +197,86 @@ def append_tension_journal(
     return len(records)
 
 
+def fr_date(iso: str) -> str:
+    """``2026-06-24`` → ``24/06``; anything unparseable comes back untouched."""
+    try:
+        return date.fromisoformat(iso).strftime("%d/%m")
+    except (TypeError, ValueError):
+        return str(iso)
+
+
+def load_tension_history(path: Path) -> dict[str, dict[str, bool]]:
+    """``{symbol: {as_of: was_an_episode_start}}`` from the journal; ``{}`` if unreadable.
+
+    Fail-soft end to end: the trajectory annotation is a comment on an alert, it
+    must never be the reason an alert is not sent. A missing journal, a truncated
+    line or a malformed record simply shrink the known history — which the caller
+    then reports as "too short to tell", never as "no tension".
+    """
+    history: dict[str, dict[str, bool]] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        logger.error("tension journal %s unreadable (%s) - trajectory unknown", path, exc)
+        return history
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        symbol, as_of = record.get("symbol"), record.get("as_of")
+        if not symbol or not as_of:
+            continue
+        days = history.setdefault(str(symbol), {})
+        started = bool(record.get("tension") and record.get("episode_start"))
+        # The same bar is journaled by every run of the day (dry-runs included):
+        # an episode seen once stays seen.
+        days[str(as_of)] = days.get(str(as_of), False) or started
+    return history
+
+
+def tension_trajectory(
+    symbol: str,
+    history: Mapping[str, Mapping[str, bool]],
+    *,
+    as_of: str | None,
+) -> str:
+    """One sentence among THREE states, describing what the journal knows.
+
+    1. a compression episode was recorded before this alert (its date, its lead);
+    2. none over a journal long enough to conclude (``MIN_TENSION_HISTORY_DAYS``);
+    3. journal shorter than that — "too short to tell".
+
+    State 3 is not a detail: a ticker that joined the cohort last week has no
+    history at all, and without it the absence of a mark would read as a negative
+    signal it is not. Descriptive only — a recorded episode is never presented as
+    the cause of the anomaly (the measured gap rests on non-independent
+    observations, epic decision).
+    """
+    journal = history.get(symbol, {})
+    known = sorted(day for day in journal if as_of is None or day < as_of)
+    window = known[-MIN_TENSION_HISTORY_DAYS:]
+    episodes = [day for day in window if journal[day]]
+    if episodes:
+        lead = ""
+        if as_of:
+            try:
+                gap = (date.fromisoformat(as_of) - date.fromisoformat(episodes[-1])).days
+                lead = f", {gap} jours avant cette alerte"
+            except ValueError:
+                lead = ""
+        return f"🔎 Compression repérée le {fr_date(episodes[-1])}{lead}."
+    if len(window) >= MIN_TENSION_HISTORY_DAYS:
+        return (
+            f"🔎 Aucune compression repérée sur les {MIN_TENSION_HISTORY_DAYS} "
+            "derniers jours suivis."
+        )
+    return (
+        f"🔎 Suivi de compression trop court ({len(window)} jour(s) suivis sur "
+        f"{MIN_TENSION_HISTORY_DAYS}) — impossible de dire s'il y a eu compression."
+    )
+
+
 def format_tension_digest(
     signals: dict[str, TensionSignal],
     *,
@@ -205,7 +294,17 @@ def format_tension_digest(
     if not starts:
         return ""
     date_label = html.escape(as_of or "unknown date")
-    lines = [f"⚡ <b>Tension — Layer C ({date_label})</b>", ""]
+    # Section title says what the section means, not which pipeline stage produced
+    # it (Epic 10 S3): these tickers are compressing, the direction is unknown,
+    # and the whole tier is an hypothesis still under measurement.
+    lines = [
+        f"⚡ <b>Titres qui se compriment — {date_label}</b>",
+        "",
+        "Ces titres se resserrent : un mouvement se prépare, sa direction est "
+        "INCONNUE. Ce n'est ni un achat ni une vente — hypothèse en cours de "
+        "validation, mesurée épisode par épisode.",
+        "",
+    ]
     for s in sorted(starts, key=lambda x: x.symbol):
         parts: list[str] = []
         glosses: list[str] = []

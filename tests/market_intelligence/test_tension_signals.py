@@ -112,7 +112,7 @@ class TestJournalAndDigest:
         )
         digest = format_tension_digest({"AAA": start, "BBB": ongoing}, as_of="2026-07-10")
         assert "AAA" in digest and "BBB" not in digest
-        assert "Tension — Layer C" in digest and "squeeze" in digest
+        assert "Titres qui se compriment" in digest and "squeeze" in digest
         assert format_tension_digest({"BBB": ongoing}, as_of="2026-07-10") == ""
 
 
