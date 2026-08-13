@@ -148,6 +148,52 @@ inversé — **le poste pousse, le VPS lit un fichier**.
   # la ligne [watchdog] porte snapshot=<date> ou snapshot=none
   ```
 
+## L'état du référentiel sort de git (Epic 10 — Sprint 4)
+
+Le référentiel est coupé **à l'intérieur** de ses fichiers : ce qui se décide reste
+versionné dans `market_intelligence/data/`, ce qui suit la cohorte part sous
+`runtime/referential/`, gitignoré.
+
+| Reste versionné | Part vers `runtime/referential/` |
+|---|---|
+| `alert_thresholds.json` (clé `thresholds`) | `registry.json` |
+| `sector_factors.json` (`market_factor`, `correlation_threshold`, `sector_factors`) | `classifications.json` |
+| `dedup_thresholds.json`, `short_interest_thresholds.json`, `quarantine.json` | `single_factor_symbols.json` |
+
+Raison : ces trois fichiers changent tous les jours depuis que le référentiel suit
+la cohorte (S2). Les garder dans git obligeait à commiter automatiquement pour
+survivre au `git reset --hard origin/main` du déploiement. Sortis de git, ils n'ont
+plus rien à quoi survivre — comme `watchlist.json` et `portfolio.json` avant eux.
+
+⚠️ **Migration obligatoire AVANT le déploiement qui apporte ce sprint.** Le reset
+supprimerait `market_intelligence/data/registry.json`, qui n'est plus versionné, et
+la machine repartirait avec un registre vide (aucun ticker scanné jusqu'au premier
+passage du pont) :
+
+```bash
+# Sur le VPS, AVANT de déployer. Idempotent : ne fait rien si l'état est déjà là.
+cd /opt/apps/stock-tracker
+python3 scripts/migrate_referential_state.py --dry-run   # montre le plan
+python3 scripts/migrate_referential_state.py             # déplace
+ls -l runtime/referential/                               # 3 fichiers attendus
+```
+
+Vérifications après déploiement :
+
+```bash
+make check-referential        # cohérence listes runtime ↔ référentiels
+make check-config-invariant   # la moitié configuration n'a pas bougé d'un octet
+```
+
+`check-config-invariant` compare l'empreinte SHA-256 des seuils et de la table des
+facteurs sectoriels à la référence figée avant la migration
+(`market_intelligence/data/config_invariant.json`). Un changement volontaire de
+seuil se fait en PR, puis `python3 scripts/check_config_invariant.py --update`
+regénère la référence — c'est la seule façon de la faire bouger.
+
+`deploy/referential-sync.path` reste en place : il ne surveille plus que la moitié
+configuration, la seule qui ait encore une raison d'être commitée.
+
 ## Mode dry-run du pipeline EOD (Sprint 1 — epic dédup transactionnel)
 
 Le pipeline `python -m market_intelligence.eod_orchestrator` peut être exécuté **sans

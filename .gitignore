@@ -25,7 +25,12 @@ __pycache__/
 watchlist.json
 portfolio.json
 
-# Runtime anomaly state
+# Runtime anomaly state, and since Epic 10 S4 the referential state too:
+# runtime/referential/registry.json, classifications.json, single_factor_symbols.json.
+# Elles suivent la cohorte, donc elles changent tous les jours — un `git reset --hard`
+# de déploiement les détruirait, ce pour quoi un commit automatique devait exister.
+# Ce qui se décide (seuils, table des facteurs sectoriels, quarantaine) reste versionné
+# dans market_intelligence/data/.
 runtime/
 
 # Agent tooling & local orchestration (machine-specific ; symlinks vers l'Obsidian vault).

@@ -7,9 +7,26 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 DATA_DIR = Path(__file__).parent / "data"
-REGISTRY_PATH = DATA_DIR / "registry.json"
+
+# Configuration — decided, reviewed in a PR, versioned. A deploy `git reset --hard`
+# is supposed to restore exactly these.
 ALERT_THRESHOLDS_PATH = DATA_DIR / "alert_thresholds.json"
 SECTOR_FACTORS_PATH = DATA_DIR / "sector_factors.json"
+# The registry is split the same way, along the same line: the macro tickers, the
+# beta-gate factor ETFs and the API alias map are structural decisions — and the
+# bridge never rebuilds them, so a fresh machine would lose them for good if they
+# left git with the rest.
+REGISTRY_CONFIG_PATH = DATA_DIR / "registry_config.json"
+
+# Execution state — follows the cohort since Epic 10 S2, so it changes every day
+# and has no place in git: a deploy would destroy it, which is why an automatic
+# commit had to exist at all. Lives under the gitignored runtime tree instead,
+# like watchlist.json and portfolio.json before it. This module is the single
+# place that resolves these paths — readers follow by importing them.
+STATE_DIR = REPO_ROOT / "runtime" / "referential"
+REGISTRY_PATH = STATE_DIR / "registry.json"  # portfolio_tickers only
+CLASSIFICATIONS_PATH = STATE_DIR / "classifications.json"
+SINGLE_FACTORS_PATH = STATE_DIR / "single_factor_symbols.json"
 
 BLOCKING = "blocking"
 INFO = "info"
@@ -41,22 +58,49 @@ def load_runtime_symbols(path: Path) -> list[str]:
     return [t["symbol"] for t in data.get("tickers", [])]
 
 
-def load_registry_symbols(path: Path = REGISTRY_PATH) -> set[str]:
-    """Return the set of portfolio ticker symbols declared in the registry."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return {t["symbol"] for t in data.get("portfolio_tickers", [])}
+def load_state(path: Path) -> dict:
+    """Read a state file; ``{}`` when it does not exist yet.
+
+    A machine that has never run the bridge has no state at all — that is the
+    normal first boot, not an error: the configuration is valid, the state is
+    empty, and the first reconciliation rebuilds it. Only an absent file is
+    tolerated; a corrupt one still raises, because silently treating garbage as
+    "empty" would look exactly like a purge order.
+    """
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_classified_symbols(path: Path = ALERT_THRESHOLDS_PATH) -> set[str]:
+def load_registry_symbols(path: Path | None = None) -> set[str]:
+    """Return the set of portfolio ticker symbols declared in the registry.
+
+    Resolved at call time, not at import: a default bound to the module constant
+    would ignore any later redirection of the state tree, and a test redirecting it
+    would silently read the real file — passing while proving nothing.
+    """
+    return {t["symbol"] for t in load_state(path or REGISTRY_PATH).get("portfolio_tickers", [])}
+
+
+def load_classified_symbols(path: Path | None = None) -> set[str]:
     """Return the symbols that have an alert classification."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return set(data.get("classifications", {}))
+    return set(load_state(path or CLASSIFICATIONS_PATH).get("classifications", {}))
 
 
-def load_factor_covered_symbols(path: Path = SECTOR_FACTORS_PATH) -> set[str]:
-    """Return symbols covered by a sector-factor mapping or a single-factor entry."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return set(data.get("sector_factors", {})) | set(data.get("single_factor_symbols", []))
+def load_factor_covered_symbols(
+    path: Path | None = None,
+    single_factors_path: Path | None = None,
+) -> set[str]:
+    """Return symbols covered by a sector-factor mapping or a single-factor entry.
+
+    Two sources since Epic 10 S4, one per side of the split: the sector map is
+    configuration (an ETF choice, decided in a PR), the single-factor list is
+    state (whatever the cohort brought in with no sector guessed for it).
+    """
+    config = Path(path or SECTOR_FACTORS_PATH)
+    sector_map = json.loads(config.read_text(encoding="utf-8")).get("sector_factors", {})
+    single = load_state(single_factors_path or SINGLE_FACTORS_PATH)
+    return set(sector_map) | set(single.get("single_factor_symbols", []))
 
 
 def evaluate(
@@ -127,9 +171,24 @@ def run_check(portfolio_path: Path | None = None, watchlist_path: Path | None = 
 
     Returns 1 if any blocking incoherence is found, else 0. Prints one line per
     problem naming the file to fix.
+
+    A machine with **no state file at all** has nothing to check yet (Epic 10 S4):
+    the state is rebuilt by the first bridge run, and that is the normal first boot
+    — CI included, since the state left git. Blocking a deploy on it would rebuild
+    the very failure mode this epic removes. An existing but incoherent state is
+    still blocking: the guard is skipped only when the state does not exist.
     """
     portfolio_path = portfolio_path or _resolve_runtime_path("portfolio")
     watchlist_path = watchlist_path or _resolve_runtime_path("watchlist")
+
+    if not any(
+        p.exists() for p in (REGISTRY_PATH, CLASSIFICATIONS_PATH, SINGLE_FACTORS_PATH)
+    ):
+        print(
+            f"registry_check: aucun état de référentiel sous {STATE_DIR} — "
+            "rien à vérifier (il sera reconstruit au premier passage du pont)."
+        )
+        return 0
 
     runtime = {
         portfolio_path.name: load_runtime_symbols(portfolio_path),

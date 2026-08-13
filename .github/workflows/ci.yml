@@ -34,6 +34,12 @@ jobs:
       - name: Validate ticker referential coherence
         run: make check-referential
 
+      # L'état du référentiel a quitté git (Epic 10 S4) : la CI n'en a plus, donc
+      # check-referential n'y a rien à vérifier. C'est la moitié CONFIGURATION qui
+      # est désormais gardée ici — un seuil ou un facteur sectoriel altéré rougit.
+      - name: Validate referential configuration invariant
+        run: make check-config-invariant
+
       - name: Lint
         run: make lint
 

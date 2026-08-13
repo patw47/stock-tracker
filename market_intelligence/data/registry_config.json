@@ -1,0 +1,87 @@
+{
+  "macro_tickers": [
+    {
+      "symbol": "IWM",
+      "api_symbol": "IWM",
+      "expected_name": "iShares Russell 2000"
+    },
+    {
+      "symbol": "^VIX",
+      "api_symbol": "^VIX",
+      "expected_name": "CBOE Volatility Index"
+    },
+    {
+      "symbol": "^TNX",
+      "api_symbol": "^TNX",
+      "expected_name": "CBOE Interest Rate 10"
+    },
+    {
+      "symbol": "DXY",
+      "api_symbol": "DX-Y.NYB",
+      "expected_name": "US Dollar"
+    },
+    {
+      "symbol": "OIL",
+      "api_symbol": "CL=F",
+      "expected_name": "Crude Oil"
+    }
+  ],
+  "factor_tickers": [
+    {
+      "symbol": "NUKZ",
+      "api_symbol": "NUKZ",
+      "expected_name": "Range Nuclear Renaissance ETF"
+    },
+    {
+      "symbol": "QTUM",
+      "api_symbol": "QTUM",
+      "expected_name": "Defiance Quantum ETF"
+    },
+    {
+      "symbol": "PHO",
+      "api_symbol": "PHO",
+      "expected_name": "Invesco Water Resources ETF"
+    },
+    {
+      "symbol": "FIW",
+      "api_symbol": "FIW",
+      "expected_name": "First Trust Water ETF"
+    },
+    {
+      "symbol": "MOO",
+      "api_symbol": "MOO",
+      "expected_name": "VanEck Agribusiness ETF"
+    },
+    {
+      "symbol": "IHI",
+      "api_symbol": "IHI",
+      "expected_name": "iShares U.S. Medical Devices ETF"
+    },
+    {
+      "symbol": "XLV",
+      "api_symbol": "XLV",
+      "expected_name": "Health Care Select Sector SPDR"
+    },
+    {
+      "symbol": "XBI",
+      "api_symbol": "XBI",
+      "expected_name": "SPDR S&P Biotech ETF"
+    },
+    {
+      "symbol": "BOTZ",
+      "api_symbol": "BOTZ",
+      "expected_name": "Global X Robotics & AI ETF"
+    },
+    {
+      "symbol": "KARS",
+      "api_symbol": "KARS",
+      "expected_name": "KraneShares Electric Vehicles ETF"
+    }
+  ],
+  "alias_map": {
+    "DXY": "DX-Y.NYB",
+    "OIL": "CL=F",
+    "^VIX": "^VIX",
+    "^TNX": "^TNX"
+  }
+}

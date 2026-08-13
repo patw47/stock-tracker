@@ -8,7 +8,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).parent.parent
-_REGISTRY_PATH = _REPO_ROOT / "market_intelligence" / "data" / "registry.json"
+# The registry is execution state since Epic 10 S4 — registry_check resolves where
+# it lives, this module only follows. Quarantine stays configuration (a human
+# decision to stop trusting a symbol), so it stays versioned in data/.
 _QUARANTINE_PATH = _REPO_ROOT / "market_intelligence" / "data" / "quarantine.json"
 
 
@@ -57,12 +59,27 @@ def _parse_ticker(raw: dict[str, str]) -> TickerEntry:
 
 
 def load_registry() -> Registry:
-    """Load the canonical ticker registry from market_intelligence/data/registry.json."""
-    raw = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
-    portfolio = tuple(_parse_ticker(t) for t in raw["portfolio_tickers"])
-    macro = tuple(_parse_ticker(t) for t in raw["macro_tickers"])
-    factor = tuple(_parse_ticker(t) for t in raw.get("factor_tickers", []))
-    alias_map: dict[str, str] = raw.get("alias_map", {})
+    """Load the canonical ticker registry from its two halves (Epic 10 S4).
+
+    Configuration — macro tickers, beta-gate factor ETFs, API alias map — stays
+    versioned in ``data/registry_config.json``: these are structural decisions, and
+    the bridge never rebuilds them, so a fresh machine would lose them for good if
+    they lived in state. The portfolio tickers follow the cohort and come from the
+    gitignored state file; absent, they are simply empty — nothing is fetched and
+    nothing alerts until the first bridge run repopulates them.
+    """
+    from market_intelligence.registry_check import (
+        REGISTRY_CONFIG_PATH,
+        REGISTRY_PATH,
+        load_state,
+    )
+
+    config = json.loads(REGISTRY_CONFIG_PATH.read_text(encoding="utf-8"))
+    raw = load_state(REGISTRY_PATH)
+    portfolio = tuple(_parse_ticker(t) for t in raw.get("portfolio_tickers", []))
+    macro = tuple(_parse_ticker(t) for t in config.get("macro_tickers", []))
+    factor = tuple(_parse_ticker(t) for t in config.get("factor_tickers", []))
+    alias_map: dict[str, str] = config.get("alias_map", {})
     logger.debug(
         "Registry loaded: %d portfolio, %d macro, %d factor tickers",
         len(portfolio),

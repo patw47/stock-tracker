@@ -55,9 +55,22 @@ class BetaGateResult:
         return asdict(self)
 
 
-def load_factor_config(path: Path = _CONFIG_PATH) -> FactorConfig:
-    """Load the explicit market and sector factor mapping."""
+def load_factor_config(
+    path: Path = _CONFIG_PATH,
+    single_factors_path: Path | None = None,
+) -> FactorConfig:
+    """Load the explicit market and sector factor mapping.
+
+    Two files since Epic 10 S4: the market factor, the correlation threshold and
+    the sector map are configuration (an ETF choice, decided in a PR); the
+    single-factor list is state — whatever the cohort brought in with no sector
+    guessed for it. An absent state file is an empty list, the fresh-machine case:
+    every symbol then falls back to the market factor alone.
+    """
+    from market_intelligence.registry_check import SINGLE_FACTORS_PATH, load_state
+
     raw = json.loads(path.read_text(encoding="utf-8"))
+    single = load_state(single_factors_path or SINGLE_FACTORS_PATH)
     return FactorConfig(
         market_factor=str(raw["market_factor"]),
         correlation_threshold=float(raw["correlation_threshold"]),
@@ -66,7 +79,7 @@ def load_factor_config(path: Path = _CONFIG_PATH) -> FactorConfig:
             for symbol, factors in raw["sector_factors"].items()
         },
         single_factor_symbols=tuple(
-            str(symbol) for symbol in raw["single_factor_symbols"]
+            str(symbol) for symbol in single.get("single_factor_symbols", [])
         ),
         endogeneity_note=str(raw["endogeneity_note"]),
     )

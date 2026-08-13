@@ -110,10 +110,17 @@ def signal_types_by_event(runs: list[dict]) -> dict[str, tuple[str, ...]]:
     return mapping
 
 
-def load_classifications(path: Path = _ALERT_THRESHOLDS_PATH) -> dict[str, str]:
-    """Return the ticker → classification map from alert_thresholds.json."""
+def load_classifications(path: Path | None = None) -> dict[str, str]:
+    """Return the ticker → classification map from its runtime state file.
+
+    Already fail-soft (a missing file gives an empty map): a monthly report is a
+    summary, it must not fail because a classification table is absent. Since Epic
+    10 S4 that table is state and lives outside git.
+    """
+    from market_intelligence.registry_check import CLASSIFICATIONS_PATH
+
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(Path(path or CLASSIFICATIONS_PATH).read_text(encoding="utf-8"))
     except OSError:
         return {}
     classifications = data.get("classifications", {})
@@ -216,7 +223,7 @@ def run(
     *,
     outcomes_path: Path = OUTCOMES_PATH,
     runs_path: Path = RUNS_LOG_PATH,
-    thresholds_path: Path = _ALERT_THRESHOLDS_PATH,
+    thresholds_path: Path | None = None,
     today: date | None = None,
 ) -> str:
     """Aggregate the previous calendar month and return the Telegram message."""

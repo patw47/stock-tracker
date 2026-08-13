@@ -26,17 +26,20 @@ def referentials(tmp_path, monkeypatch):
 
     AUTOUSE on purpose: since Epic 10 S2 a reconciliation writes the registry and
     validates symbols over the network. Left to their defaults, every test in this
-    file would hit yfinance and edit the committed market_intelligence/data files.
+    file would hit yfinance and edit the real referential files.
+
+    Since Epic 10 S4 the three files it writes are STATE (registry, classifications,
+    single-factor list); the sector map next to them is configuration, seeded here
+    read-only so nothing in this file can rewrite a committed config file.
     """
     seeds = {
         "REGISTRY_PATH": ("registry.json", {
             "portfolio_tickers": [], "macro_tickers": [], "factor_tickers": [], "alias_map": {},
         }),
-        "ALERT_THRESHOLDS_PATH": ("alert_thresholds.json", {
-            "thresholds": {"volume_z": 2.5}, "classifications": {},
-        }),
+        "CLASSIFICATIONS_PATH": ("classifications.json", {"classifications": {}}),
+        "SINGLE_FACTORS_PATH": ("single_factor_symbols.json", {"single_factor_symbols": []}),
         "SECTOR_FACTORS_PATH": ("sector_factors.json", {
-            "market_factor": "IWM", "sector_factors": {}, "single_factor_symbols": [],
+            "market_factor": "IWM", "sector_factors": {},
         }),
     }
     for attr, (name, seed) in seeds.items():
@@ -54,8 +57,9 @@ def referentials(tmp_path, monkeypatch):
 
     class _Referentials:
         registry = tmp_path / "registry.json"
-        thresholds = tmp_path / "alert_thresholds.json"
-        factors = tmp_path / "sector_factors.json"
+        thresholds = tmp_path / "classifications.json"
+        factors = tmp_path / "single_factor_symbols.json"
+        sector_map = tmp_path / "sector_factors.json"
 
         def symbols(self) -> set[str]:
             data = json.loads(self.registry.read_text(encoding="utf-8"))
@@ -65,8 +69,9 @@ def referentials(tmp_path, monkeypatch):
             return json.loads(self.thresholds.read_text(encoding="utf-8"))["classifications"]
 
         def factor_covered(self) -> set[str]:
-            data = json.loads(self.factors.read_text(encoding="utf-8"))
-            return set(data["sector_factors"]) | set(data["single_factor_symbols"])
+            single = json.loads(self.factors.read_text(encoding="utf-8"))
+            sector = json.loads(self.sector_map.read_text(encoding="utf-8"))
+            return set(sector["sector_factors"]) | set(single["single_factor_symbols"])
 
     return _Referentials()
 
@@ -431,8 +436,9 @@ def _seed(referentials, *symbols: str) -> None:
         ticker_onboard.onboard_ticker(
             symbol,
             registry_path=referentials.registry,
-            thresholds_path=referentials.thresholds,
-            factors_path=referentials.factors,
+            classifications_path=referentials.thresholds,
+            single_factors_path=referentials.factors,
+            sector_factors_path=referentials.sector_map,
         )
 
 

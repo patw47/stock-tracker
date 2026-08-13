@@ -1,4 +1,4 @@
-.PHONY: results results-check test lint validate-json check-referential test-deploy
+.PHONY: results results-check test lint validate-json check-referential test-deploy check-config-invariant
 
 # Entrypoints de verification : la CI appelle ces cibles, pas les outils
 # directement, pour que poste local et CI executent strictement la meme chose.
@@ -16,6 +16,13 @@ validate-json:
 
 check-referential:
 	python3 -m market_intelligence.registry_check
+
+# Invariant de migration (Epic 10 S4) : la moitie CONFIGURATION du referentiel
+# (seuils + table des facteurs sectoriels) doit etre identique a sa reference
+# figee avant le deplacement. Tolerance nulle. Ne porte jamais sur l'etat, qui
+# change tous les jours par construction.
+check-config-invariant:
+	python3 scripts/check_config_invariant.py
 
 # Verdict de deploiement (deploy/deploy_verdict.py), testable sans VPS.
 test-deploy:
