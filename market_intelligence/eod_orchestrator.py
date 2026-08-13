@@ -5,6 +5,7 @@ import fcntl
 import html
 import json
 import logging
+import math
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -35,10 +36,17 @@ from market_intelligence.telegram_split import split_telegram_html
 from market_intelligence.tension_signals import (
     append_tension_journal,
     format_tension_digest,
+    load_tension_history,
+    tension_trajectory,
 )
 from market_intelligence.tension_signals import (
     calculate_all as calculate_tension_signals,
 )
+from market_intelligence.tension_signals import (
+    fr_date as tension_fr_date,
+)
+from market_intelligence.v5_bridge import COHORT_KEY
+from market_intelligence.v5_bridge import HORIZON_DAYS as V5_HORIZON_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +276,22 @@ _BREAKOUT_VERB: Final[dict[str, str]] = {
 # Below this |gap| the open is read as "quasi inchangée" (Epic 7 S2 rule 2).
 _GAP_FLAT: Final[float] = 0.01
 
+# Cohort context (Epic 10 S3). The horizon comes from the bridge, single source:
+# a ticker leaves the cohort at days_held >= 63, so "day 27/63" is the same 63.
+COHORT_HORIZON_DAYS: Final[int] = V5_HORIZON_DAYS
+
+# Screener status codes → plain French. The code is the screener's own vocabulary
+# (backend/lifecycle.py); an unknown code falls back to "statut <code>" rather
+# than disappearing — a silent drop would hide a protocol change.
+_COHORT_STATUS: Final[dict[str, str]] = {
+    "above": "au-dessus de son repère de première semaine",
+    "below": "sous son repère de première semaine",
+    "too_early": "trop tôt pour un premier repère",
+    "closed": "fenêtre de jugement échue",
+    "explosion": "fenêtre échue sur un doublement",
+    "crash": "fenêtre échue sur un effondrement",
+}
+
 _HYSTERESIS_BLOCK: Final[str] = "\n".join(
     (
         "ℹ️ <b>Le filtre d'hystérésis — pourquoi si peu d'alertes ?</b>",
@@ -312,11 +336,43 @@ def load_provenance_labels() -> dict[str, str] | None:
         return None
 
 
+def load_cohort_context() -> dict[str, dict] | None:
+    """Map each watchlist ticker to the screener context the bridge stored on it.
+
+    The v5 bridge writes ``cohort`` on the entries it owns (Epic 10 S3); tickers
+    added by hand, and every ticker outside the cohort, simply have no entry here
+    and render without those fields. Same fail-soft motif as
+    ``load_provenance_labels``: any read/parse failure returns ``None``.
+    """
+    from market_intelligence.registry_check import _resolve_runtime_path
+
+    try:
+        path = Path(_resolve_runtime_path("watchlist"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {
+            str(entry["symbol"]).strip().upper(): entry[COHORT_KEY]
+            for entry in data["tickers"]
+            if isinstance(entry.get(COHORT_KEY), dict) and entry.get("symbol")
+        }
+    except Exception as exc:
+        logger.error("cohort context skipped (watchlist unreadable): %s", exc)
+        return None
+
+
 def _provenance_tag(labels: Mapping[str, str] | None, ticker: str) -> str:
     """Parenthesised origin tag to append after a ticker, empty when unavailable."""
     if labels is None:
         return ""
     return f" ({labels.get(ticker, REGISTRY_ONLY_LABEL)})"
+
+
+def _finite(value: object) -> float | None:
+    """Numbers only: JSON from the screener may carry ``null`` or a string."""
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def _fr(value: float, *, signed: bool = False, decimals: int = 1) -> str:
@@ -497,11 +553,49 @@ def _escalation_prose(
     return " ".join(sentences)
 
 
+def _cohort_line(context: Mapping[str, object] | None) -> str:
+    """Where the selection thesis stands on this ticker, or "" outside the cohort.
+
+    Every field is optional: a ticker the screener has just qualified carries no
+    ``ret`` yet, and a ticker in no cohort at all carries no context — it then
+    renders without these fields instead of breaking the block (Epic 10 S3).
+    """
+    if not context:
+        return ""
+    parts: list[str] = []
+    entry_date = context.get("entry_date")
+    entry_price = _finite(context.get("entry_price"))
+    if entry_date:
+        priced = f" à {_fr(entry_price, decimals=2)}" if entry_price is not None else ""
+        parts.append(f"retenu le {html.escape(tension_fr_date(str(entry_date)))}{priced}")
+    days_held = _finite(context.get("days_held"))
+    if days_held is not None:
+        left = _finite(context.get("days_left"))
+        remaining = f" ({int(left)} restants)" if left is not None else ""
+        parts.append(f"jour {int(days_held)}/{COHORT_HORIZON_DAYS}{remaining}")
+    ret = _finite(context.get("ret"))
+    if ret is not None:
+        parts.append(f"{_fr(100 * ret, signed=True)} % depuis l'entrée")
+    status = context.get("status")
+    code = status.get("code") if isinstance(status, Mapping) else status
+    if code:
+        # Only the values coming from the payload are escaped — the canned French
+        # is module text, and escaping it would turn every apostrophe into an
+        # entity (shared digest doctrine).
+        parts.append(_COHORT_STATUS.get(str(code), f"statut {html.escape(str(code))}"))
+    if not parts:
+        return ""
+    sentence = ", ".join(parts)
+    return "🎯 " + sentence[0].upper() + sentence[1:] + "."
+
+
 def _survivor_block(
     index: int,
     alert: DeduplicatedAlert,
     signal: AnomalySignals | None,
     provenance: Mapping[str, str] | None = None,
+    cohort: Mapping[str, Mapping[str, object]] | None = None,
+    trajectory: str = "",
 ) -> str:
     candidate = alert.candidate
     ticker = html.escape(candidate.ticker)
@@ -514,6 +608,11 @@ def _survivor_block(
     else:
         paragraph = _standard_prose(ticker, alert, signal)
     lines = [header, "", paragraph]
+    cohort_line = _cohort_line((cohort or {}).get(candidate.ticker))
+    if cohort_line:
+        lines.append(cohort_line)
+    if trajectory:
+        lines.append(trajectory)
     if alert.squeeze_prone is True:
         lines.append("⚠ Profil squeeze possible (short interest élevé).")
     lines.append(f"→ Pour l'analyse Warren : « point sur {ticker} »")
@@ -528,6 +627,8 @@ def format_digest(
     total_analyzed: int,
     tension_block: str = "",
     provenance: Mapping[str, str] | None = None,
+    cohort: Mapping[str, Mapping[str, object]] | None = None,
+    tension_history: Mapping[str, Mapping[str, bool]] | None = None,
 ) -> str:
     """Render survivors + tension into one deterministic Telegram digest (HTML).
 
@@ -540,6 +641,10 @@ def format_digest(
 
     ``provenance`` (Epic 7 S1) tags each ticker with its runtime-list origin;
     ``None`` (unreadable list) renders the pre-Epic-7 digest untouched.
+
+    ``cohort`` (Epic 10 S3) carries the screener's judgment context per ticker and
+    ``tension_history`` the compression journal used for the trajectory note;
+    ``None`` on either renders the block without that line.
     """
     ordered = sorted(
         survivors, key=lambda a: abs(a.candidate.z_resid or 0.0), reverse=True
@@ -547,20 +652,34 @@ def format_digest(
     sections: list[str] = []
     if ordered:
         count = len(ordered)
-        noun = "survivant" if count == 1 else "survivants"
+        noun = "titre" if count == 1 else "titres"
         sections.append(
             "\n".join(
                 (
-                    f"📊 <b>EOD anomalies — {html.escape(as_of or 'date inconnue')}</b>",
-                    f"{count} {noun} sur {total_analyzed} symboles analysés.",
-                    "Un « survivant » = un ticker dont l'anomalie est NEUVE aujourd'hui.",
+                    f"📊 <b>Mouvements inhabituels — "
+                    f"{html.escape(as_of or 'date inconnue')}</b>",
+                    f"{count} {noun} sur {total_analyzed} analysés.",
+                    "Le mouvement VIENT D'AVOIR LIEU : la direction indiquée est un "
+                    "constat sur la journée écoulée, jamais une prévision.",
                 )
             )
         )
         for index, alert in enumerate(ordered, start=1):
+            trajectory = (
+                ""
+                if tension_history is None
+                else tension_trajectory(
+                    alert.candidate.ticker, tension_history, as_of=as_of
+                )
+            )
             sections.append(
                 _survivor_block(
-                    index, alert, signals.get(alert.candidate.ticker), provenance
+                    index,
+                    alert,
+                    signals.get(alert.candidate.ticker),
+                    provenance,
+                    cohort,
+                    trajectory,
                 )
             )
     if tension_block:
@@ -585,6 +704,7 @@ def run_eod_anomaly_pipeline(
     watchlist_symbols: Sequence[str] | None = None,
     watchlist_fetcher: Callable[[list[str], int], dict[str, pd.DataFrame]] = fetch_symbols,
     provenance: Mapping[str, str] | None = None,
+    cohort: Mapping[str, Mapping[str, object]] | None = None,
 ) -> EodRunResult:
     """Run S0-S5 once in the Sprint 8 deployment order.
 
@@ -648,8 +768,12 @@ def run_eod_anomaly_pipeline(
     # no classification, no beta gate. Computed before the digest so the
     # deterministic renderer can slot the block in its template position.
     tension_block = ""
+    tension_history: dict[str, dict[str, bool]] | None = None
     if tension_journal_path is not None:
         try:
+            # Read BEFORE appending today's bars: the trajectory annotation looks
+            # for a compression recorded *before* this alert, never on the same day.
+            tension_history = load_tension_history(tension_journal_path)
             tension_frames = dict(portfolio_frames)
             extra = [s for s in (watchlist_symbols or ()) if s not in tension_frames]
             if extra:
@@ -674,6 +798,8 @@ def run_eod_anomaly_pipeline(
         total_analyzed=len(decisions),
         tension_block=tension_block,
         provenance=provenance,
+        cohort=cohort,
+        tension_history=tension_history,
     )
 
     issues = list(_missing_frame_issues(frames, ticker_registry))
@@ -785,6 +911,7 @@ def main() -> None:
         tension_journal_path=_TENSION_LOG_PATH,
         watchlist_symbols=_load_watchlist_symbols(),
         provenance=load_provenance_labels(),
+        cohort=load_cohort_context(),
     )
     print(json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True))
 

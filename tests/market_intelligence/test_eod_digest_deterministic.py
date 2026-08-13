@@ -20,7 +20,11 @@ from market_intelligence.dedup_hysteresis import DeduplicatedAlert
 from market_intelligence.eod_orchestrator import format_digest
 from market_intelligence.registry_schema import Registry, TickerEntry
 from market_intelligence.short_interest import ShortInterestResult
-from market_intelligence.tension_signals import TensionSignal, format_tension_digest
+from market_intelligence.tension_signals import (
+    MIN_TENSION_HISTORY_DAYS,
+    TensionSignal,
+    format_tension_digest,
+)
 
 
 def _signals(symbol: str, **overrides: object) -> AnomalySignals:
@@ -101,10 +105,13 @@ def test_format_digest_reproduces_the_frozen_template() -> None:
         tension_block=_tension_block(),
     )
 
-    # Fixed header.
-    assert "📊 <b>EOD anomalies — 2026-07-17</b>" in digest
-    assert "2 survivants sur 181 symboles analysés." in digest
-    assert "Un « survivant » = un ticker dont l'anomalie est NEUVE aujourd'hui." in digest
+    # Fixed header — dit ce que la section signifie, pas l'étage de pipeline.
+    assert "📊 <b>Mouvements inhabituels — 2026-07-17</b>" in digest
+    assert "2 titres sur 181 analysés." in digest
+    assert (
+        "Le mouvement VIENT D'AVOIR LIEU : la direction indiquée est un constat "
+        "sur la journée écoulée, jamais une prévision." in digest
+    )
 
     # BBAI — initial: canned phrase + signal_types translation + numbers + squeeze.
     assert "BBAI — hausse ↑" in digest
@@ -129,8 +136,9 @@ def test_format_digest_reproduces_the_frozen_template() -> None:
     assert "Il casse en plus son plus-bas 52 semaines." in digest
     assert "→ Pour l'analyse Warren : « point sur HIMS »" in digest
 
-    # Tension block (existing format_tension_digest, reused unchanged).
-    assert "Tension — Layer C" in digest
+    # Tension block: titre explicite, direction inconnue annoncée.
+    assert "⚡ <b>Titres qui se compriment — 2026-07-17</b>" in digest
+    assert "sa direction est INCONNUE" in digest
     assert "ASTS" in digest and "squeeze" in digest
 
     # Fixed hysteresis explainer — the 4 cases, verbatim.
@@ -152,7 +160,7 @@ def test_format_digest_reproduces_the_frozen_template() -> None:
 
 def test_format_digest_singular_and_empty() -> None:
     one = format_digest([_bbai()], _signal_map(), as_of="2026-07-17", total_analyzed=181)
-    assert "1 survivant sur 181 symboles analysés." in one  # singular
+    assert "1 titre sur 181 analysés." in one  # singular
     # Nothing to send: no survivors, no tension.
     assert format_digest([], {}, as_of="2026-07-17", total_analyzed=181) == ""
 
@@ -231,45 +239,49 @@ def test_provenance_tags_survivor_headers_and_tension_lines() -> None:
 # of the untagged rendering (fail-soft path). Update only on a deliberate template
 # change, never to make a test pass.
 _UNTAGGED_DIGEST = """\
-📊 <b>EOD anomalies — 2026-07-17</b>
-2 survivants sur 181 symboles analysés.
-Un « survivant » = un ticker dont l'anomalie est NEUVE aujourd'hui.
+📊 <b>Mouvements inhabituels — 2026-07-17</b>
+2 titres sur 181 analysés.
+Le mouvement VIENT D'AVOIR LIEU : la direction indiquée est un constat sur la journée \
+écoulée, jamais une prévision.
 ────────────────────────────
 <b>1. HIMS — baisse ↓   [escalade]</b>
 
-Escalade : HIMS était déjà verrouillé (il avait déclenché à −2,4), mais son \
-z-résiduel s'est aggravé jusqu'à −3,4, soit +1,0 au-delà du niveau qui l'avait \
-fait alerter. Concrètement : clôture −9,8 % aujourd'hui, alors que le titre avait \
-OUVERT en hausse (+2,2 %) — il s'est retourné en cours de journée — la situation \
-s'aggrave au lieu de se calmer. Il casse en plus son plus-bas 52 semaines.
+Escalade : HIMS était déjà verrouillé (il avait déclenché à −2,4), mais son z-résiduel \
+s'est aggravé jusqu'à −3,4, soit +1,0 au-delà du niveau qui l'avait fait alerter. \
+Concrètement : clôture −9,8 % aujourd'hui, alors que le titre avait OUVERT en hausse \
+(+2,2 %) — il s'est retourné en cours de journée — la situation s'aggrave au lieu de se \
+calmer. Il casse en plus son plus-bas 52 semaines.
 → Pour l'analyse Warren : « point sur HIMS »
 ────────────────────────────
 <b>2. BBAI — hausse ↑   [première alerte]</b>
 
-Première alerte : BBAI n'était pas encore « verrouillé » et vient de franchir son \
-seuil de déclenchement. Concrètement : clôture +7,2 % aujourd'hui, après une \
-ouverture déjà en hausse (gap +6,4 %). Mouvement porté par un volume relatif de \
-4,2× la normale et un volume anormalement élevé (z +3,1). Son z-résiduel atteint \
-+2,8 (seuil 2,5) — le titre bouge nettement plus que son comportement habituel : \
-son mouvement propre, une fois retirée la part expliquée par le marché, fait \
-environ 3× sa journée typique. Gap d'ouverture +6,4 %, volatilité en expansion \
-(ATR ×1,9).
+Première alerte : BBAI n'était pas encore « verrouillé » et vient de franchir son seuil \
+de déclenchement. Concrètement : clôture +7,2 % aujourd'hui, après une ouverture déjà en \
+hausse (gap +6,4 %). Mouvement porté par un volume relatif de 4,2× la normale et un \
+volume anormalement élevé (z +3,1). Son z-résiduel atteint +2,8 (seuil 2,5) — le titre \
+bouge nettement plus que son comportement habituel : son mouvement propre, une fois \
+retirée la part expliquée par le marché, fait environ 3× sa journée typique. Gap \
+d'ouverture +6,4 %, volatilité en expansion (ATR ×1,9).
 ⚠ Profil squeeze possible (short interest élevé).
 → Pour l'analyse Warren : « point sur BBAI »
 ────────────────────────────
-⚡ <b>Tension — Layer C (2026-07-17)</b>
+⚡ <b>Titres qui se compriment — 2026-07-17</b>
 
-<b>ASTS</b>: squeeze (bw pctl 8%); accumulation calme (rvol5 1.6, 5j +7.2%) — \
-move attendu 20j ±14%
-   ↳ volatilité comprimée dans le pire décile de son année — un mouvement se \
-prépare, direction inconnue
+Ces titres se resserrent : un mouvement se prépare, sa direction est INCONNUE. Ce n'est \
+ni un achat ni une vente — hypothèse en cours de validation, mesurée épisode par \
+épisode.
+
+<b>ASTS</b>: squeeze (bw pctl 8%); accumulation calme (rvol5 1.6, 5j +7.2%) — move \
+attendu 20j ±14%
+   ↳ volatilité comprimée dans le pire décile de son année — un mouvement se prépare, \
+direction inconnue
    ↳ volume anormal sans mouvement de prix — accumulation silencieuse possible
 ────────────────────────────
 ℹ️ <b>Le filtre d'hystérésis — pourquoi si peu d'alertes ?</b>
 
-Un ticker n'alerte qu'UNE fois en franchissant son seuil (z-résiduel ~2,5). Il \
-est ensuite « verrouillé » et reste silencieux tant qu'il ne fait rien de neuf. \
-Il ne réapparaît que dans 4 cas :
+Un ticker n'alerte qu'UNE fois en franchissant son seuil (z-résiduel ~2,5). Il est \
+ensuite « verrouillé » et reste silencieux tant qu'il ne fait rien de neuf. Il ne \
+réapparaît que dans 4 cas :
  • escalade — son z-résiduel s'aggrave d'au moins +1,0
  • renversement — la direction s'inverse (hausse ↔ baisse)
  • nouveau signal — un type de signal s'ajoute (volume, cassure 52 sem…)
@@ -477,6 +489,186 @@ def test_default_eod_path_never_calls_warren(monkeypatch) -> None:
     # sent. The prod send path (dry_run=False → should_send=True) is covered by
     # test_skip_warren_without_dry_run_is_allowed.
     assert result.should_send is False
-    assert "📊 <b>EOD anomalies — 2026-07-17</b>" in result.digest
+    assert "📊 <b>Mouvements inhabituels — 2026-07-17</b>" in result.digest
     assert "point sur BBAI" in result.digest and "point sur HIMS" in result.digest
     assert "Le filtre d'hystérésis" in result.digest
+
+
+# ── Epic 10 S3 — l'alerte dit ce qu'elle sait ───────────────────────────────
+
+
+def _cohort_context(**overrides: object) -> dict[str, object]:
+    """Le contexte que le pont v5 stocke sur l'entrée de watchlist."""
+    base: dict[str, object] = {
+        "entry_date": "2026-07-17", "entry_price": 4.12, "days_held": 27,
+        "days_left": 36, "ret": 0.08, "status": {"code": "above"},
+    }
+    base.update(overrides)
+    return base
+
+
+def _journal(days: int, *, episode_on: str | None = None) -> dict[str, dict[str, bool]]:
+    """Un journal de tension de ``days`` séances pour BBAI, épisode optionnel."""
+    dates = [f"2026-06-{day:02d}" for day in range(1, days + 1)]
+    return {"BBAI": {day: day == episode_on for day in dates}}
+
+
+def test_no_pipeline_vocabulary_survives_in_the_rendered_digest() -> None:
+    """Le message dit ce que chaque section signifie, pas l'étage qui l'a produite."""
+    digest = format_digest(
+        [_bbai(), _hims()],
+        _signal_map(),
+        as_of="2026-07-17",
+        total_analyzed=181,
+        tension_block=_tension_block(),
+        cohort={"BBAI": _cohort_context()},
+        tension_history=_journal(25, episode_on="2026-06-12"),
+    )
+
+    assert digest  # sinon le test est vrai par vacuité
+    lowered = digest.lower()
+    for banned in ("layer b", "layer c", "survivant"):
+        assert banned not in lowered, f"« {banned} » reste dans le digest envoyé"
+
+
+def test_cohort_ticker_shows_its_day_out_of_63_and_return_since_entry() -> None:
+    """Critère 4 : jour sur 63 et performance depuis l'entrée, dans le bloc du titre."""
+    digest = format_digest(
+        [_bbai()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
+        cohort={"BBAI": _cohort_context()},
+    )
+
+    assert (
+        "🎯 Retenu le 17/07 à 4,12, jour 27/63 (36 restants), +8,0 % depuis l'entrée, "
+        "au-dessus de son repère de première semaine." in digest
+    )
+
+
+def test_ticker_outside_the_cohort_renders_without_those_fields() -> None:
+    """Critère 5 : hors cohorte = pas de ligne cohorte, et le digest reste entier."""
+    digest = format_digest(
+        [_bbai(), _hims()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
+        cohort={"BBAI": _cohort_context()},
+    )
+
+    hims_block = digest[digest.index("1. HIMS"): digest.index("2. BBAI")]
+    assert "🎯" not in hims_block  # HIMS n'est dans aucune cohorte
+    assert "/63" not in hims_block and "depuis l'entrée" not in hims_block
+    assert "point sur HIMS" in hims_block  # le bloc est rendu, pas amputé
+    assert "🎯 Retenu le 17/07" in digest  # BBAI, lui, porte bien son contexte
+
+    # Aucun contexte du tout : le digest reste non vide et complet.
+    without = format_digest(
+        [_bbai(), _hims()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
+        cohort={},
+    )
+    assert "🎯" not in without
+    assert "point sur BBAI" in without and "point sur HIMS" in without
+
+
+def _trajectory_line(digest: str) -> str:
+    return next(line for line in digest.splitlines() if line.startswith("🔎"))
+
+
+def test_tension_trajectory_has_three_states_and_never_guesses() -> None:
+    """Critère 6 : un journal plus court que le seuil dit « trop court », jamais « aucune »."""
+    def render(history: dict[str, dict[str, bool]]) -> str:
+        return format_digest(
+            [_bbai()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
+            tension_history=history,
+        )
+
+    # État 1 — une compression antérieure, avec sa date et son avance.
+    found = _trajectory_line(render(_journal(25, episode_on="2026-06-12")))
+    assert found == "🔎 Compression repérée le 12/06, 35 jours avant cette alerte."
+
+    # État 2 — aucune compression, sur un historique assez long pour conclure.
+    none = _trajectory_line(render(_journal(MIN_TENSION_HISTORY_DAYS)))
+    assert none == (
+        f"🔎 Aucune compression repérée sur les {MIN_TENSION_HISTORY_DAYS} "
+        "derniers jours suivis."
+    )
+
+    # État 3 — journal plus court que le seuil : « je ne sais pas », jamais
+    # « aucune ». Sans lui, un ticker entré en cohorte cette semaine se lirait
+    # comme un titre sans tension, ce qu'il n'est pas.
+    short = _trajectory_line(render(_journal(MIN_TENSION_HISTORY_DAYS - 1)))
+    assert short == (
+        f"🔎 Suivi de compression trop court ({MIN_TENSION_HISTORY_DAYS - 1} jour(s) "
+        f"suivis sur {MIN_TENSION_HISTORY_DAYS}) — impossible de dire s'il y a eu "
+        "compression."
+    )
+    assert "Aucune compression" not in short
+    # Un ticker absent du journal est le cas limite du même état.
+    assert "trop court" in _trajectory_line(render({}))
+
+
+def test_digest_chunks_concatenate_back_into_the_exact_digest() -> None:
+    """Critère 7 : artefact = la liste de morceaux ; invariant = reconstitution exacte."""
+    digest = format_digest(
+        [_bbai(), _hims()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
+        tension_block=_tension_block(), cohort={"BBAI": _cohort_context()},
+        tension_history=_journal(25, episode_on="2026-06-12"),
+    )
+
+    # Le chemin réel (celui que n8n relaie), puis une limite basse pour que le
+    # découpage produise vraiment plusieurs morceaux — sinon le test est vacuité.
+    assert "".join(orchestrator.split_telegram_html(digest)) == digest
+    # Limite basse mais au-dessus du plus gros bloc : on veut un vrai découpage,
+    # pas la dégradation en texte brut (qui retire les balises, c'est son rôle).
+    chunks = orchestrator.split_telegram_html(digest, limit=1000)
+    assert len(chunks) > 1
+    assert "".join(chunks) == digest
+
+
+def test_load_cohort_context_reads_the_watchlist_and_fails_soft(tmp_path, monkeypatch) -> None:
+    """Les entrées portant un contexte sont retenues ; une liste illisible ⇒ None."""
+    from market_intelligence import registry_check
+
+    monkeypatch.setattr(registry_check, "REPO_ROOT", tmp_path)
+    (tmp_path / "watchlist.json").write_text(
+        json.dumps({"tickers": [
+            {"symbol": "bbai", "source": "smallcaps-v5", "cohort": _cohort_context()},
+            {"symbol": "NVDA", "added": "2026-01-05"},  # ajout manuel : hors cohorte
+        ]}),
+        encoding="utf-8",
+    )
+
+    assert orchestrator.load_cohort_context() == {"BBAI": _cohort_context()}
+
+    (tmp_path / "watchlist.json").write_text("{ not json", encoding="utf-8")
+    assert orchestrator.load_cohort_context() is None
+
+
+def test_pipeline_wires_cohort_context_and_tension_journal_into_the_digest(
+    tmp_path, monkeypatch
+) -> None:
+    """Bout en bout : le contexte et le journal arrivent réellement dans le message."""
+    monkeypatch.delenv("ANOMALY_DEDUP_READONLY", raising=False)
+    monkeypatch.setattr(orchestrator, "calculate_all", lambda frames: _signal_map())
+    monkeypatch.setattr(orchestrator, "calculate_beta_gates", lambda signals, frames: {})
+    monkeypatch.setattr(
+        orchestrator, "evaluate_candidates", lambda *a, **k: {"BBAI": _bbai().candidate}
+    )
+    journal = tmp_path / "tension.jsonl"
+    journal.write_text(
+        "".join(
+            json.dumps({"symbol": "BBAI", "as_of": f"2026-06-{day:02d}",
+                        "tension": day == 12, "episode_start": day == 12}) + "\n"
+            for day in range(1, 26)
+        ),
+        encoding="utf-8",
+    )
+
+    result = orchestrator.run_eod_anomaly_pipeline(
+        registry=_registry(("BBAI",)),
+        frame_fetcher=lambda days: {"BBAI": _frame()},
+        short_interest_fetcher=lambda reg: {"BBAI": _short("BBAI")},
+        deduplicator=lambda decisions, short_interest, **kwargs: (_bbai(),),
+        dry_run=True,
+        cohort={"BBAI": _cohort_context()},
+        tension_journal_path=journal,
+    )
+
+    assert "jour 27/63 (36 restants)" in result.digest
+    assert "🔎 Compression repérée le 12/06" in result.digest

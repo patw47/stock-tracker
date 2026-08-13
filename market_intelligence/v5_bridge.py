@@ -58,6 +58,11 @@ WATCHLIST_PATH = REPO_ROOT / "watchlist.json"
 PORTFOLIO_PATH = REPO_ROOT / "portfolio.json"
 SOURCE_TAG = "smallcaps-v5"
 HORIZON_DAYS = 63  # v5 judgment horizon: a bridged ticker leaves at days_held >= 63
+# Cohort context carried from the screener's tracking journal to the watchlist
+# entry, and from there to the alert block (Epic 10 S3). Kept verbatim: the
+# renderer formats, it never recomputes.
+COHORT_KEY = "cohort"
+COHORT_FIELDS = ("entry_date", "entry_price", "days_held", "days_left", "ret", "status")
 DEFAULT_CAP = 150
 DEFAULT_API_URL = "http://localhost:8000"
 
@@ -96,12 +101,33 @@ def _iter_rows(node: object):
             yield from _iter_rows(item)
 
 
-def parse_tracking(payload: object) -> dict[str, int] | None:
-    """Max ``days_held`` per ticker over the union of the v5 tracking windows.
+def _cohort_context(row: dict, days: int) -> dict:
+    """Keep the tracking fields the digest renders; drop everything else.
+
+    Absent or null fields are simply absent from the context: a row may carry
+    ``days_left: None`` before the first close after entry, and the renderer
+    omits whatever is missing rather than printing a hole.
+    """
+    context = {
+        field: row[field]
+        for field in COHORT_FIELDS
+        if row.get(field) is not None and row[field] != ""
+    }
+    context["days_held"] = days
+    return context
+
+
+def parse_tracking(payload: object) -> dict[str, dict] | None:
+    """Cohort context per ticker over the union of the v5 tracking windows.
 
     A ticker present in several windows yields a single entry (the longest
     holding wins). Returns ``None`` when the payload is not usable at all, which
     the caller must treat as a no-op — never as an empty tracking journal.
+
+    Since Epic 10 S3 the whole judgment context travels (``entry_date``,
+    ``entry_price``, ``days_held``, ``days_left``, ``ret``, ``status``), not just
+    ``days_held``: the alert must be able to say where the thesis stands on that
+    ticker, and this journal is the only place that knows.
 
     Scoped to the ``v5`` section on purpose: the live payload also carries a
     ``v4_tracking`` journal (the previous protocol, a different cohort, 79 of its
@@ -115,15 +141,18 @@ def parse_tracking(payload: object) -> dict[str, int] | None:
             type(section).__name__,
         )
         return None
-    tracked: dict[str, int] = {}
+    tracked: dict[str, dict] = {}
     for row in _iter_rows(section):
         symbol = str(row.get("ticker", "")).strip().upper()
         try:
             days = int(row["days_held"])
         except (TypeError, ValueError):
             continue  # fail-soft: one bad row never sinks the run
-        if symbol:
-            tracked[symbol] = max(tracked.get(symbol, days), days)
+        if not symbol:
+            continue
+        known = tracked.get(symbol)
+        if known is None or days > known["days_held"]:
+            tracked[symbol] = _cohort_context(row, days)
     return tracked
 
 
@@ -343,7 +372,7 @@ def reconcile(
         logger.warning("v5 bridge: %s", anomaly)
         return _result([], [], len(ours), [anomaly])
 
-    keep = {symbol for symbol, days in tracked.items() if days < HORIZON_DAYS}
+    keep = {symbol for symbol, context in tracked.items() if context["days_held"] < HORIZON_DAYS}
     removed = sorted(ours - keep)  # J+63 reached, or gone from the journal
     room = max(cap - len(ours - set(removed)), 0)
     candidates = sorted(keep - present)
@@ -356,22 +385,39 @@ def reconcile(
         logger.warning("v5 bridge: %s", anomaly)
         anomalies.append(anomaly)
 
-    if added or removed:
-        drop = set(removed)
-        # Both conditions, always: a symbol is only ever dropped when it carries
-        # our own provenance tag. A manual entry sharing the symbol stays.
-        data["tickers"] = [
-            t for t in entries
-            if not (_symbol(t) in drop and t.get("source") == SOURCE_TAG)
-        ]
+    drop = set(removed)
+    # Both conditions, always: a symbol is only ever dropped when it carries
+    # our own provenance tag. A manual entry sharing the symbol stays.
+    kept = [
+        t for t in entries
+        if not (_symbol(t) in drop and t.get("source") == SOURCE_TAG)
+    ]
+    # The cohort context ages one notch per trading day, so it is refreshed on the
+    # entries we own — otherwise the alert would print a stale "day 27/63". The
+    # write stays conditional: refreshed is False when the context is identical,
+    # and an unchanged snapshot then leaves the file byte-identical.
+    refreshed = False
+    for entry in kept:
+        context = tracked.get(_symbol(entry))
+        if entry.get("source") == SOURCE_TAG and context and entry.get(COHORT_KEY) != context:
+            entry[COHORT_KEY] = context
+            refreshed = True
+
+    if added or removed or refreshed:
+        data["tickers"] = kept
         data["tickers"].extend(
-            {"symbol": symbol, "added": _today(), "source": SOURCE_TAG} for symbol in added
+            {
+                "symbol": symbol, "added": _today(), "source": SOURCE_TAG,
+                COHORT_KEY: tracked[symbol],
+            }
+            for symbol in added
         )
         # Memorised only on an APPLIED snapshot: a fresh snapshot that changes
         # nothing must leave the file byte-identical (conditional write).
         if scanned_at is not None:
             data[SCANNED_AT_KEY] = scanned_at.isoformat()
         _save(str(path), data)
+    if added or removed:
         # The referential follows the cohort (Epic 10 S2). After the write, so a
         # symbol kept by a manual entry sharing the symbol still counts as present.
         referential = sync_referential(

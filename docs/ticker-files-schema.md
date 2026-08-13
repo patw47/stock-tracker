@@ -7,10 +7,10 @@ Location and structure of portfolio and watchlist files.
 | **Relative path** | `portfolio.json` | `watchlist.json` |
 | **Top-level key** | `tickers` (array) | `tickers` (array) |
 | **Entry format** | Object | Object |
-| **Entry fields** | `symbol`, `name`, `sector` | `symbol`, `name`, `sector` ; entries written by the [v5 bridge](../README.md#-v5-bridge--smallcaps-cohorts-into-the-watchlist) carry `symbol`, `added`, `source: "smallcaps-v5"` instead (no `name`/`sector` — nothing reads them for detection) |
+| **Entry fields** | `symbol`, `name`, `sector` | `symbol`, `name`, `sector` ; entries written by the [v5 bridge](../README.md#-v5-bridge--smallcaps-cohorts-into-the-watchlist) carry `symbol`, `added`, `source: "smallcaps-v5"` and `cohort` instead (no `name`/`sector` — nothing reads them for detection) |
 | **Example entry** | `{ "symbol": "BBAI", "name": "BigBear.ai", "sector": "IA défense" }` | `{ "symbol": "SMR", "name": "NuScale Power", "sector": "Nucléaire SMR" }` |
 | **Entry count** | 8 in the example (VPS file is the source of truth) | 8 in the example ; **~152 on the VPS** (grown via `/modifywatchlist`), plus up to 150 bridged entries once `v5-bridge.timer` is deployed (~82 at the first run, expiring at J+63) |
-| **Additional fields** | `updated_at` (metadata) | `updated_at` (metadata) |
+| **Additional fields** | `updated_at` (metadata) | `updated_at` (metadata), `v5_scanned_at` (bridge monotonicity bound), and per bridged entry `cohort` = the screener's judgment context, kept verbatim (`entry_date`, `entry_price`, `days_held`, `days_left`, `ret`, `status`), refreshed on every applied snapshot and rendered in the EOD alert block |
 | **Detection tier** | Layer B + Layer C (registry entry, classification and factor mapping required) | Layer B + C once in the registry (PR #53 onboarded all 152) ; a **new** add is covered by the tension tier (Layer C only) until onboarded |
 
 ## Usage in n8n Code node
