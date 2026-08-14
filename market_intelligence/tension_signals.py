@@ -27,12 +27,19 @@ EXPECTED_MOVE_MULT: Final[float] = 2.0  # explosion = move > MULT x expected
 
 # Couverture minimale du journal de tension pour qu'une ABSENCE de compression
 # soit une information (Epic 10 S3). Dérivée de HORIZON_DAYS : c'est la fenêtre
-# sur laquelle un épisode est mesuré (docs/TENSION.md), donc la mémoire minimale
-# qu'il faut avoir d'un titre pour affirmer qu'il ne s'est rien passé. Un journal
-# plus court que sa propre fenêtre de mesure ne peut dire que « je ne sais pas » :
-# un ticker entré en cohorte la semaine dernière n'a aucun historique, et son
-# absence de marque se lirait à tort comme un signal négatif.
+# sur laquelle l'ISSUE d'un épisode se juge (docs/TENSION.md) — à ne pas confondre
+# avec _BW_WINDOW, la fenêtre de mesure de la bande, qui vaut 20 elle aussi. Cette
+# durée est donc la mémoire minimale qu'il faut avoir d'un titre pour affirmer
+# qu'il ne s'est rien passé : un ticker entré en cohorte la semaine dernière n'a
+# aucun historique, et son absence de marque se lirait à tort comme un signal
+# négatif.
 MIN_TENSION_HISTORY_DAYS: Final[int] = HORIZON_DAYS
+
+# Un journal peut être assez LONG sans être assez DENSE : 20 relevés étalés sur
+# trois mois ne disent rien des semaines manquantes. Les jours journalisés sont
+# des jours ouvrés (~1,4 jour calendaire chacun) ; au-delà du double, la fenêtre
+# est trouée et l'absence de marque redevient une ignorance, pas une information.
+_MAX_SPAN_MULT: Final[int] = 2
 
 _BW_WINDOW: Final[int] = 20
 _BW_RANK_WINDOW: Final[int] = 252
@@ -235,6 +242,18 @@ def load_tension_history(path: Path) -> dict[str, dict[str, bool]]:
     return history
 
 
+def _window_span_days(window: list[str]) -> int:
+    """Durée calendaire couverte par une fenêtre de jours journalisés (bornes incluses).
+
+    0 pour une fenêtre vide ou de dates illisibles — un span nul ne peut pas
+    dépasser le plafond, donc l'inconnu ne dégrade jamais le verdict tout seul.
+    """
+    try:
+        return (date.fromisoformat(window[-1]) - date.fromisoformat(window[0])).days + 1
+    except (IndexError, TypeError, ValueError):
+        return 0
+
+
 def tension_trajectory(
     symbol: str,
     history: Mapping[str, Mapping[str, bool]],
@@ -244,14 +263,16 @@ def tension_trajectory(
     """One sentence among THREE states, describing what the journal knows.
 
     1. a compression episode was recorded before this alert (its date, its lead);
-    2. none over a journal long enough to conclude (``MIN_TENSION_HISTORY_DAYS``);
-    3. journal shorter than that — "too short to tell".
+    2. none over a journal both long AND dense enough to conclude;
+    3. journal too short, or too sparse to cover its own window — "can't tell".
 
     State 3 is not a detail: a ticker that joined the cohort last week has no
     history at all, and without it the absence of a mark would read as a negative
-    signal it is not. Descriptive only — a recorded episode is never presented as
-    the cause of the anomaly (the measured gap rests on non-independent
-    observations, epic decision).
+    signal it is not. Sparseness is the same trap seen from the other side — a
+    journal with holes (EOD job down, ticker in and out of the cohort) would
+    otherwise claim "nothing happened" over weeks it never observed. Descriptive
+    only — a recorded episode is never presented as the cause of the anomaly (the
+    measured gap rests on non-independent observations, epic decision).
     """
     journal = history.get(symbol, {})
     known = sorted(day for day in journal if as_of is None or day < as_of)
@@ -266,14 +287,20 @@ def tension_trajectory(
             except ValueError:
                 lead = ""
         return f"🔎 Compression repérée le {fr_date(episodes[-1])}{lead}."
-    if len(window) >= MIN_TENSION_HISTORY_DAYS:
+    if len(window) < MIN_TENSION_HISTORY_DAYS:
         return (
-            f"🔎 Aucune compression repérée sur les {MIN_TENSION_HISTORY_DAYS} "
-            "derniers jours suivis."
+            f"🔎 Suivi de compression trop court ({len(window)} jour(s) suivis sur "
+            f"{MIN_TENSION_HISTORY_DAYS}) — impossible de dire s'il y a eu compression."
+        )
+    if _window_span_days(window) > MIN_TENSION_HISTORY_DAYS * _MAX_SPAN_MULT:
+        return (
+            f"🔎 Suivi de compression trop clairsemé ({len(window)} jours suivis "
+            f"depuis le {fr_date(window[0])}) — impossible de dire s'il y a eu "
+            "compression."
         )
     return (
-        f"🔎 Suivi de compression trop court ({len(window)} jour(s) suivis sur "
-        f"{MIN_TENSION_HISTORY_DAYS}) — impossible de dire s'il y a eu compression."
+        f"🔎 Aucune compression repérée sur les {MIN_TENSION_HISTORY_DAYS} "
+        "derniers jours suivis."
     )
 
 
