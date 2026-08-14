@@ -12,6 +12,7 @@ vrai par vacuité. Ce qui est vérifié ici l'est par lecture directe des fichie
 """
 from __future__ import annotations
 
+import importlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,8 +20,6 @@ from pathlib import Path
 import pytest
 
 from market_intelligence import registry_check, ticker_onboard, v5_bridge
-
-_UNIT = Path(__file__).resolve().parents[2] / "deploy" / "referential-sync.path"
 
 
 @dataclass(frozen=True)
@@ -126,13 +125,20 @@ def test_a_reconciliation_rebuilds_the_state_from_nothing(bare_machine, tmp_path
     )
 
 
-def test_the_sync_path_unit_no_longer_covers_the_state_files():
-    """Le chemin surveillé ne contient plus l'état — lecture de l'unité et du chemin."""
-    watched = next(
-        line.split("=", 1)[1].strip()
-        for line in _UNIT.read_text(encoding="utf-8").splitlines()
-        if line.startswith("PathChanged=")
-    )
+def test_no_deploy_unit_commits_the_referential_any_more():
+    """L'état vit hors de git, et plus aucune unité ne l'y remet.
+
+    Avant l'Epic 10 S4, ``referential-sync.path`` surveillait
+    ``market_intelligence/data/`` pour committer les ajouts faits depuis Telegram.
+    Le S4 a déplacé exactement ces fichiers hors du dossier surveillé ; l'unité,
+    devenue muette, a été supprimée à la clôture de l'epic (dette 2). Ce test tient
+    les deux moitiés de la garantie : l'état est bien sous ``runtime/``, et rien
+    dans ``deploy/`` ne rejoue un commit automatique du référentiel.
+    """
+    deploy_dir = Path(__file__).resolve().parents[2] / "deploy"
+    assert not list(deploy_dir.glob("referential-sync.*"))
+    for script in deploy_dir.glob("*.sh"):
+        assert "git add market_intelligence/data" not in script.read_text(encoding="utf-8")
 
     state_dir = registry_check.STATE_DIR.resolve()
     for path in (
@@ -141,11 +147,44 @@ def test_the_sync_path_unit_no_longer_covers_the_state_files():
         registry_check.SINGLE_FACTORS_PATH,
     ):
         assert path.resolve().is_relative_to(state_dir)
-        # Le chemin surveillé est celui du VPS ; on compare les suffixes de dépôt.
-        assert Path(watched).name not in path.parts
 
-    # Ce qui reste surveillé est bien la moitié configuration, et elle existe.
-    assert watched.endswith("market_intelligence/data")
+    assert "runtime" in registry_check.STATE_DIR.parts  # l'état est ailleurs
+    # La moitié configuration, elle, reste versionnée à sa place.
     assert registry_check.ALERT_THRESHOLDS_PATH.parent.name == "data"
     assert registry_check.SECTOR_FACTORS_PATH.parent.name == "data"
-    assert "runtime" in registry_check.STATE_DIR.parts  # l'état est ailleurs
+
+
+def test_migration_carries_the_state_and_leaves_the_configuration_behind(tmp_path, monkeypatch):
+    """Dette Epic 10 S4 : le script de migration ne recopie plus les clés inertes.
+
+    L'ancien ``registry.json`` mêlait les deux moitiés. Copié tel quel, il produisait
+    un état porteur de ``macro_tickers``/``factor_tickers``/``alias_map`` que plus
+    aucun lecteur ne lit à cet endroit — deux formes du même fichier, dont l'une
+    éditable sans le moindre effet.
+    """
+    migrate = importlib.import_module("scripts.migrate_referential_state")
+
+    legacy = tmp_path / "registry.json"
+    legacy.write_text(json.dumps({
+        "portfolio_tickers": [{"symbol": "BBAI", "api_symbol": "BBAI"}],
+        "macro_tickers": [{"symbol": "IWM", "api_symbol": "IWM"}],
+        "factor_tickers": [{"symbol": "XLK", "api_symbol": "XLK"}],
+        "alias_map": {"DXY": "DX-Y.NYB"},
+    }), encoding="utf-8")
+
+    state = tmp_path / "runtime" / "registry.json"
+    monkeypatch.setattr(migrate, "LEGACY_REGISTRY", legacy)
+    monkeypatch.setattr(migrate, "REGISTRY_PATH", state)
+    monkeypatch.setattr(migrate, "CLASSIFICATIONS_PATH", tmp_path / "runtime" / "classifications.json")
+    monkeypatch.setattr(migrate, "SINGLE_FACTORS_PATH", tmp_path / "runtime" / "single_factor_symbols.json")
+    monkeypatch.setattr(migrate, "ALERT_THRESHOLDS_PATH", tmp_path / "alert_thresholds.json")
+    monkeypatch.setattr(migrate, "SECTOR_FACTORS_PATH", tmp_path / "sector_factors.json")
+
+    assert migrate.migrate() == 0
+
+    migrated = json.loads(state.read_text(encoding="utf-8"))
+    assert migrated == {"portfolio_tickers": [{"symbol": "BBAI", "api_symbol": "BBAI"}]}
+    for key in ("macro_tickers", "factor_tickers", "alias_map"):
+        assert key not in migrated
+    # Non destructif : l'ancien fichier garde tout, la config reste récupérable.
+    assert "alias_map" in json.loads(legacy.read_text(encoding="utf-8"))

@@ -69,7 +69,6 @@ jobs:
             echo "watchdog_timer=$(get STATUS_WATCHDOG_TIMER)"
             echo "outcome_timer=$(get STATUS_OUTCOME_TIMER)"
             echo "tension_timer=$(get STATUS_TENSION_TIMER)"
-            echo "referential_sync=$(get STATUS_REFERENTIAL_SYNC)"
             echo "v5_timer=$(get STATUS_V5_TIMER)"
             echo "overall=$(get STATUS_OVERALL)"
           } >> "$GITHUB_OUTPUT"
@@ -92,7 +91,6 @@ jobs:
           wd="${{ steps.deploy.outputs.watchdog_timer }}"
           ot="${{ steps.deploy.outputs.outcome_timer }}"
           tn="${{ steps.deploy.outputs.tension_timer }}"
-          rs="${{ steps.deploy.outputs.referential_sync }}"
           v5="${{ steps.deploy.outputs.v5_timer }}"
           ov="${{ steps.deploy.outputs.overall }}"
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -112,7 +110,6 @@ jobs:
             "watchdog EOD: $(icon "${wd:-?}") ${wd:-inconnu}" \
             "outcome tracker: $(icon "${ot:-?}") ${ot:-inconnu}" \
             "tension outcomes: $(icon "${tn:-?}") ${tn:-inconnu}" \
-            "sync référentiel: $(icon "${rs:-?}") ${rs:-inconnu}" \
             "pont v5: $(icon "${v5:-?}") ${v5:-inconnu}" \
             "commit: ${HEAD_SHA:0:7}" \
             "$run_url")

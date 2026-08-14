@@ -191,8 +191,18 @@ facteurs sectoriels à la référence figée avant la migration
 seuil se fait en PR, puis `python3 scripts/check_config_invariant.py --update`
 regénère la référence — c'est la seule façon de la faire bouger.
 
-`deploy/referential-sync.path` reste en place : il ne surveille plus que la moitié
-configuration, la seule qui ait encore une raison d'être commitée.
+`deploy/referential-sync.path` a été **supprimée à la clôture de l'Epic 10**. Cette
+unité surveillait `market_intelligence/data/` et committait automatiquement les
+ajouts faits depuis Telegram ; le S4 ayant déplacé exactement ces fichiers sous
+`runtime/referential/`, elle n'avait plus aucun écrivain à surveiller. Une unité
+active qui ne se déclenche jamais laisse croire qu'un filet protège encore le
+référentiel — c'est précisément la croyance qui a coûté l'incident du 2026-08-13.
+`remote.sh` la désarme (`disable --now` + retrait des fichiers d'unité) sur les
+machines où elle était installée ; `STATUS_REFERENTIAL_SYNC` a disparu du verdict
+de déploiement et du message Telegram.
+
+La moitié configuration, elle, reste versionnée : elle se modifie en PR, jamais
+par un commit automatique.
 
 ## Mode dry-run du pipeline EOD (Sprint 1 — epic dédup transactionnel)
 

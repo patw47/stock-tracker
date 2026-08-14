@@ -11,16 +11,17 @@ from __future__ import annotations
 
 import os
 
-# Doivent valoir "active" pour un déploiement ok : les services/gateway
-# existants + les 4 timers systemd + la path unit de sync référentielle
-# (Epic 9 S2 — avant ce sprint, seuls STOCK_TRACKER et WARREN comptaient).
+# Doivent valoir "active" pour un déploiement ok : les services/gateway existants
+# + les 4 timers systemd (Epic 9 S2 — avant ce sprint, seuls STOCK_TRACKER et
+# WARREN comptaient). STATUS_REFERENTIAL_SYNC en faisait partie jusqu'à la clôture
+# de l'Epic 10 : l'état étant sorti de git au S4, la path unit qu'il surveillait
+# n'avait plus d'écrivain et a été supprimée.
 _REQUIRED_ACTIVE = (
     "STATUS_STOCK_TRACKER",
     "STATUS_WARREN",
     "STATUS_WATCHDOG_TIMER",
     "STATUS_OUTCOME_TIMER",
     "STATUS_TENSION_TIMER",
-    "STATUS_REFERENTIAL_SYNC",
     "STATUS_V5_TIMER",
 )
 

@@ -10,6 +10,7 @@ path never calls Warren.
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 
 import pandas as pd
 
@@ -601,6 +602,50 @@ def test_tension_trajectory_has_three_states_and_never_guesses() -> None:
     assert "Aucune compression" not in short
     # Un ticker absent du journal est le cas limite du même état.
     assert "trop court" in _trajectory_line(render({}))
+
+
+def test_a_journal_with_holes_never_claims_nothing_happened() -> None:
+    """Dette Epic 10 S3 : assez de relevés ne vaut pas assez de couverture.
+
+    Le seuil compte des jours journalisés. 20 relevés espacés d'une semaine
+    couvrent plus de quatre mois, dont le système n'a rien vu : sans garde de
+    densité, il annonçait « aucune compression sur les 20 derniers jours suivis »
+    — faussement rassurant sur une période observée à un cinquième.
+    """
+    start = date.fromisoformat("2026-02-01")
+    sparse = {
+        "BBAI": {
+            (start + timedelta(days=7 * i)).isoformat(): False
+            for i in range(MIN_TENSION_HISTORY_DAYS)
+        }
+    }
+    line = _trajectory_line(
+        format_digest(
+            [_bbai()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
+            tension_history=sparse,
+        )
+    )
+
+    assert "Aucune compression" not in line
+    assert line == (
+        f"🔎 Suivi de compression trop clairsemé ({MIN_TENSION_HISTORY_DAYS} jours "
+        "suivis depuis le 01/02) — impossible de dire s'il y a eu compression."
+    )
+
+    # Falsifiabilité par le voisin : même nombre de relevés, séances consécutives
+    # — la garde ne doit pas mordre sur un journal sain, sinon elle ne dit rien.
+    dense = {
+        "BBAI": {
+            (start + timedelta(days=i)).isoformat(): False
+            for i in range(MIN_TENSION_HISTORY_DAYS)
+        }
+    }
+    assert "Aucune compression" in _trajectory_line(
+        format_digest(
+            [_bbai()], _signal_map(), as_of="2026-07-17", total_analyzed=181,
+            tension_history=dense,
+        )
+    )
 
 
 def test_digest_chunks_concatenate_back_into_the_exact_digest() -> None:

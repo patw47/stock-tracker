@@ -22,8 +22,8 @@ def _all_active() -> dict[str, str]:
 
 def _old_overall(st: str, n8n: str, warren: str, import_rc: int, registry_rc: int) -> str:
     """Ancienne condition de remote.sh (avant Epic 9 S2) : ignorait les 4
-    timers systemd et la path unit referential-sync — reproduite ici pour
-    prouver mécaniquement qu'un timer mort ne changeait rien à son verdict.
+    timers systemd — reproduite ici pour prouver mécaniquement qu'un timer
+    mort ne changeait rien à son verdict.
     """
     if st != "active" or n8n != "ok" or warren != "active" or import_rc != 0 or registry_rc != 0:
         return "fail"
@@ -40,7 +40,6 @@ def test_nominal_all_active_is_ok() -> None:
         "STATUS_WATCHDOG_TIMER",
         "STATUS_OUTCOME_TIMER",
         "STATUS_TENSION_TIMER",
-        "STATUS_REFERENTIAL_SYNC",
         "STATUS_V5_TIMER",
     ],
 )
