@@ -11,6 +11,9 @@ rien et sort 0. Les anciens fichiers ne sont pas supprimés — le déploiement 
 charge pour ``registry.json``, et les deux autres perdent simplement les clés
 d'état à la mise à jour du code.
 
+Ne déplace que l'ÉTAT : les clés devenues de la configuration restent où les
+lecteurs vont désormais les chercher (voir ``_STATE_KEYS``).
+
     python3 scripts/migrate_referential_state.py [--dry-run]
 """
 from __future__ import annotations
@@ -32,6 +35,14 @@ from market_intelligence.registry_check import (  # noqa: E402 - after sys.path
 )
 
 LEGACY_REGISTRY = DATA_DIR / "registry.json"
+
+# Seule clé d'ÉTAT de l'ancien registre : elle suit la cohorte, donc elle
+# déménage. macro_tickers / factor_tickers / alias_map sont de la CONFIGURATION
+# depuis l'Epic 10 S4 et vivent dans data/registry_config.json — les recopier
+# ici produirait un état porteur de clés que plus aucun lecteur ne lit
+# (registry_schema.load_registry lit les deux moitiés à leur place), donc deux
+# formes du même fichier, dont l'une éditable sans le moindre effet.
+_STATE_KEYS = ("portfolio_tickers",)
 
 
 def _read(path: Path) -> dict | None:
@@ -57,7 +68,7 @@ def migrate(dry_run: bool = False) -> int:
     if REGISTRY_PATH.exists():
         print(f"[migrate] {REGISTRY_PATH} déjà en place — rien à faire")
     elif (legacy := _read(LEGACY_REGISTRY)) is not None:
-        _write(REGISTRY_PATH, legacy, dry_run)
+        _write(REGISTRY_PATH, {k: legacy[k] for k in _STATE_KEYS if k in legacy}, dry_run)
         moved += 1
     else:
         print(f"[migrate] ⚠️  ni {REGISTRY_PATH} ni {LEGACY_REGISTRY} — registre vide")
