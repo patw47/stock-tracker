@@ -398,7 +398,7 @@ Never hand-edit `portfolio.json` / `watchlist.json` — the flow goes through `a
 - **Referential consistency enforced** — `registry_check` blocking in CI and at deploy
 - **Self-measured signal** — J+1/J+5/J+20 outcomes, monthly report, no-look-ahead backtest
 - **systemd managed** — n8n, OpenClaw gateway (on-demand Warren) + watchdog/outcome timers
-- **CI/CD** — push to `main` → 372 tests → auto-deploy on the VPS via self-hosted runner (workflow version published, referential validated)
+- **CI/CD** — push to `main` → 428 tests → auto-deploy on the VPS via self-hosted runner (workflow version published, referential validated)
 
 ---
 
@@ -446,7 +446,7 @@ stock-tracker/
 │   ├── tickerbrief/           # On-demand ticker brief skill spec (SKILL.md)
 │   ├── modifyportfolio/       # Portfolio management via Telegram (with Layer B onboarding)
 │   └── modifywatchlist/       # Watchlist management via Telegram (with Layer B onboarding)
-├── tests/                     # pytest suite — 397 tests (agents, market_intelligence, deploy, workflow wiring)
+├── tests/                     # pytest suite — 428 tests (agents, market_intelligence, deploy, workflow wiring)
 ├── docs/                      # project-structure, deployment, backtest guide, ticker schema
 ├── deploy/                    # CI/CD: remote.sh, import_workflow.py (version publish),
 │                              # deploy_verdict.py (deploy pass/fail, testable off-VPS),
@@ -753,10 +753,11 @@ CI and the local machine run **the same commands**: `.github/workflows/ci.yml`
 calls the `make` targets, never the tools directly.
 
 ```bash
-make test              # full offline pytest suite (397 tests)
+make test              # full offline pytest suite (428 tests)
 make lint              # ruff check . — rules in .ruff.toml, target-version py310
 make validate-json     # workflow.json + the two *.example.json stay parseable
 make check-referential # registry vs portfolio/watchlist coherence (blocking)
+make check-config-invariant # the configuration half has not drifted since Epic 10 S4
 make test-deploy       # deploy verdict logic, no VPS needed
 ```
 
