@@ -20,8 +20,10 @@ API_URL=${SMALLCAPS_API_URL:-http://localhost:8000}
 REMOTE=${SCREENER_PUSH_REMOTE:-hetzner-vps}
 REMOTE_PATH=${SCREENER_PUSH_PATH:-/opt/apps/stock-tracker/runtime/screener/latest.json}
 
-# ponytail: sleep fixe pour laisser le scan finir d'écrire son instantané, comme
-# referential-sync.sh ; passer à un vrai debounce si des rafales posent problème.
+# ponytail: sleep fixe pour laisser le scan finir d'écrire son instantané. Il ne
+# débounce PAS (deux poussées observées à 12 s d'écart pour un seul scan) : dette
+# acceptée à la clôture de l'Epic 10, le coût est du réseau gâché, le pont étant
+# idempotent et refusant tout instantané plus vieux que le dernier accepté.
 sleep 10
 
 tmp=$(mktemp)

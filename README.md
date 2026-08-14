@@ -299,10 +299,10 @@ in forward validation.
   enabled by `deploy/remote.sh` like the other timers; state reported as
   `STATUS_V5_TIMER`.
 - **Not committed to git** — `watchlist.json` is gitignored (only the `.example`
-  files are versioned), and `referential-sync.path` watches
-  `market_intelligence/data/`, not the repo root. The bridge's writes therefore
-  live on the VPS only, exactly like a Telegram `/modifywatchlist` add. Nothing to
-  wire: the runtime lists have never been versioned.
+  files are versioned), and since Epic 10 S4 the referential state lives under the
+  gitignored `runtime/referential/` too. The bridge's writes therefore live on the
+  VPS only, exactly like a Telegram `/modifywatchlist` add. Nothing to wire: no
+  runtime list has ever been versioned.
 - **Disabling it** — `sudo systemctl disable --now v5-bridge.timer`; the watchlist
   keeps whatever it holds (bridged entries stop expiring, which is inert).
   Removing them by hand means dropping the entries tagged `smallcaps-v5`.
@@ -784,12 +784,11 @@ push main → CI green ──► .github/workflows/deploy.yml  (runs-on: self-ho
                                    n8n execute --id  (validation run, as warren, n8n stopped)
                                    start stock-tracker
                                    healthcheck: services + n8n :5680/healthz
-                                   + the 4 systemd timers and the referential-sync
-                                     path unit must all be `active`
+                                   + the 4 systemd timers must all be `active`
                                    deploy_verdict.py → ok / fail (fail-closed:
                                      no verdict at all counts as fail)
                               → Telegram status message (success / failure, one
-                                indicator per service, timer and path unit)
+                                indicator per service and timer)
 ```
 
 See `docs/deployement.md` for the full rationale (self-hosted runner, custom sqlite
